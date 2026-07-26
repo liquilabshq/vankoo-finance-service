@@ -5,20 +5,28 @@
 LAYOUT_LEFT_RIGHT()
 LAYOUT_WITH_LEGEND()
 
-title C4 - Contexto de Vankoo Finance
+title C4 - Contexto de Vankoo Finance (v1: recarga de saldo)
 
-Person(mype, "MYPE", "Usa la aplicación web de Vankoo para gestionar sus operaciones financieras.")
-Person(investor, "Inversionista", "Usa la aplicación móvil de Vankoo para consultar e iniciar operaciones financieras.")
+Person(investor, "Inversionista", "Recarga saldo en su monedero de Vankoo desde la aplicación móvil.")
+Person(mype, "MYPE", "Consulta sus operaciones desde la aplicación web. En la v1 no origina recargas.")
 
 System_Boundary(vankoo, "Plataforma Vankoo") {
-    System(finance, "Vankoo Finance Service", "Bounded Context responsable del ciclo de vida de los pagos y sus eventos de negocio.")
+    System(finance, "Vankoo Finance Service", "Bounded Context responsable del ciclo de vida de las recargas de saldo (agregado Deposit) y sus eventos de negocio.")
 }
-System_Ext(stripe, "Stripe", "Proveedor externo de pagos que crea recursos de pago y envía webhooks.")
 
-Rel(mype, finance, "Gestiona operaciones financieras a través de Vankoo")
-Rel(investor, finance, "Consulta e inicia operaciones a través de Vankoo")
-Rel(finance, stripe, "Crea y consulta pagos", "HTTPS")
-Rel(stripe, finance, "Envía webhooks", "HTTPS")
+System_Ext(stripe, "Stripe", "Proveedor externo que crea el recurso de cobro y envía webhooks de confirmación.")
+
+Rel(investor, finance, "Inicia y consulta recargas de saldo")
+Rel(mype, finance, "Consulta operaciones financieras")
+Rel(finance, stripe, "Crea y consulta cobros", "HTTPS")
+Rel(stripe, finance, "Envía webhooks de estado", "HTTPS")
+
+note bottom of finance
+  Alcance v1: la recarga termina en
+  DepositSucceededEvent y NO acredita saldo.
+  El agregado Wallet/Ledger es el contrato
+  siguiente y aún no existe como sistema.
+end note
 
 SHOW_LEGEND()
 

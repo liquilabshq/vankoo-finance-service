@@ -1,0 +1,25 @@
+@startuml finance-layers-diagram
+
+package vankoo-finance-service as vankoo_finance_service {
+    package finance {
+        package domain {}
+        package infrastructure {}
+        package application {}
+        package interfaces {}
+    }
+}
+package org.axonframework.modelling {}
+package org.springframework.web {}
+package com.stripe {}
+
+vankoo_finance_service.finance.domain ..> org.axonframework.modelling
+vankoo_finance_service.finance.infrastructure ..> vankoo_finance_service.finance.domain
+vankoo_finance_service.finance.infrastructure ..> vankoo_finance_service.finance.application
+vankoo_finance_service.finance.infrastructure ..> com.stripe
+vankoo_finance_service.finance.application ..> vankoo_finance_service.finance.domain
+vankoo_finance_service.finance.application ..> vankoo_finance_service.finance.infrastructure
+vankoo_finance_service.finance.interfaces ..> vankoo_finance_service.finance.domain
+vankoo_finance_service.finance.interfaces ..> vankoo_finance_service.finance.application
+vankoo_finance_service.finance.interfaces ..> org.springframework.web
+
+@enduml

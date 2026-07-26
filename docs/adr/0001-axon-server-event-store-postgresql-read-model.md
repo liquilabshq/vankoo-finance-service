@@ -1,9 +1,10 @@
 # ADR-0001: Axon Server como Event Store y PostgreSQL como Read Model
 
 - **Estado:** Aceptado
-- **Fecha:** 2026-07-25
+- **Fecha:** 2026-07-25 (revisado 2026-07-26)
 - **Contexto:** `vankoo-finance-service` / bounded context Finance
 - **Decisores:** Salim y Anjali
+- **Complementado por:** [ADR-0002 — Axon Framework 5 y traducción del modelo de la guía](0002-axon-5-programming-model.md)
 
 ## Contexto
 
@@ -39,6 +40,18 @@ Adoptamos la siguiente arquitectura:
      historial de eventos.
    - El Read Model no será la fuente de verdad ni se utilizará para validar
      invariantes críticas de los agregados.
+   - Las proyecciones de consulta viven en el schema **`finance_read_model`**.
+
+2b. **Las tablas operativas del borde viven en un schema separado
+    `finance_ops`.**
+   - Incluyen el inbox de webhooks, la idempotencia de comandos de cliente y la
+     resolución de referencias del proveedor.
+   - Se separan del Read Model porque **sí** participan en decisiones de
+     admisión, y el punto 2 prohíbe que el Read Model haga eso. Mezclarlas en el
+     mismo schema haría ambigua la regla.
+   - No son fuente de verdad: son reconstruibles desde el historial de eventos y
+     el log de webhooks. Su pérdida degrada las garantías de deduplicación, pero
+     no corrompe el historial.
 
 3. **Kafka será el broker de mensajería de integración.**
    - Se utilizará para publicar eventos que deban cruzar el límite del bounded
@@ -142,18 +155,26 @@ consultas.
 
 ## Decisiones pendientes derivadas
 
-- Catálogo inicial de agregados, comandos y eventos, definido en
+- ~~Catálogo inicial de agregados, comandos y eventos~~ → definido en
   [`docs/contracts/finance-contracts.md`](../contracts/finance-contracts.md).
-- Identificación de los eventos de dominio que también serán contratos Kafka,
-  definida en el catálogo de contratos.
+- ~~Identificación de los eventos de dominio que también serán contratos
+  Kafka~~ → definida en el catálogo de contratos.
+- ~~Estrategia de snapshots~~ → sin snapshots en la v1; decisión y motivo en el
+  catálogo de contratos.
+- ~~Versión mayor de Axon Framework~~ → fijada en el
+  [ADR-0002](0002-axon-5-programming-model.md).
 - Convención de nombres, esquema y versionado de eventos.
-- Estrategia de snapshots y replay.
 - Configuración de proyecciones, token store, reintentos y dead-letter queue.
 - Configuración del cluster de Axon Server, backups, TLS y control de acceso.
-- Actualización de `finance-technical-story.md` para reflejar esta decisión.
+- Política de retención del payload crudo en el inbox de webhooks.
+- Contrato del agregado `Wallet`/`Ledger` que consumirá `DepositSucceededEvent`
+  y acreditará el saldo del inversionista.
 
 ## Referencias
 
-- [Axon Framework: infraestructura de eventos](https://docs.axoniq.io/axon-framework-reference/5.1/events/infrastructure/)
-- [Axon Framework: command bus distribuido](https://docs.axoniq.io/axon-framework-reference/5.0/commands/infrastructure/)
+Todas las referencias de Axon Framework apuntan a la línea **5.x**, fijada en el
+[ADR-0002](0002-axon-5-programming-model.md).
+
+- [Axon Framework 5: infraestructura de eventos](https://docs.axoniq.io/axon-framework-reference/5.1/events/infrastructure/)
+- [Axon Framework 5: command bus distribuido](https://docs.axoniq.io/axon-framework-reference/5.0/commands/infrastructure/)
 - [Axon Server: instalación y clustering](https://docs.axoniq.io/axon-server-reference/v2026.0/axon-server/installation/local-installation/)
