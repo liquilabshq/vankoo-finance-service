@@ -7,11 +7,15 @@ LAYOUT_WITH_LEGEND()
 
 title C4 - Componentes de Finance Service
 
-Person_Ext(client, "Cliente de Vankoo", "Persona o aplicación que inicia pagos y consulta su estado.")
-System_Ext(api_gateway, "Vankoo API Gateway", "Autentica y enruta las solicitudes externas.")
+Person(mype, "MYPE", "Usa la aplicación web de Vankoo.")
+Person(investor, "Inversionista", "Usa la aplicación móvil de Vankoo.")
 System_Ext(stripe, "Stripe", "Proveedor externo de pagos y webhooks.")
-System_Ext(axon_server, "Axon Server", "Event Store y router interno de Axon.")
-System_Ext(kafka, "Kafka", "Broker de integración entre bounded contexts.")
+
+Container(web_app, "Vankoo Web App", "Angular", "Aplicación web usada por las MYPE.")
+Container(mobile_app, "Vankoo Mobile App", "Kotlin Multiplatform", "Aplicación móvil usada por los inversionistas.")
+Container(api_gateway, "Vankoo API Gateway", "Spring Cloud Gateway", "Autentica y redirige solicitudes.")
+Container(axon_server, "Axon Server", "Axon Server", "Event Store y router interno de Axon.")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker interno de integración.")
 ContainerDb(read_model, "Finance Read Model", "PostgreSQL", "Proyección durable de pagos.")
 
 Container_Boundary(finance_service, "Finance Service - Spring Boot") {
@@ -33,7 +37,10 @@ Container_Boundary(finance_service, "Finance Service - Spring Boot") {
     Component(stripe_adapter, "Stripe Payment Provider", "infrastructure", "Implementa PaymentProvider y traduce Stripe a modelos y estados de Finance.")
 }
 
-Rel(client, api_gateway, "Usa", "HTTPS")
+Rel(mype, web_app, "Usa", "HTTPS")
+Rel(investor, mobile_app, "Usa", "HTTPS")
+Rel(web_app, api_gateway, "Consume la API", "HTTPS/JSON")
+Rel(mobile_app, api_gateway, "Consume la API", "HTTPS/JSON")
 Rel(api_gateway, payment_api, "Enruta commands y queries", "HTTPS/JSON")
 Rel(api_gateway, webhook_api, "Enruta webhooks", "HTTPS")
 
