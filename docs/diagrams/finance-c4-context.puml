@@ -1,0 +1,27 @@
+@startuml finance-c4-context
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_LEFT_RIGHT()
+LAYOUT_WITH_LEGEND()
+
+title C4 - Contexto de Vankoo Finance
+
+Person(client, "Cliente de Vankoo", "Persona o aplicación que inicia pagos y consulta su estado.")
+
+System_Ext(api_gateway, "Vankoo API Gateway", "Expone el acceso externo, autentica y enruta las solicitudes.")
+System(finance, "Vankoo Finance Service", "Bounded Context responsable del ciclo de vida de los pagos y sus eventos de negocio.")
+System_Ext(stripe, "Stripe", "Proveedor externo de pagos que crea recursos de pago y envía webhooks.")
+System_Ext(kafka, "Kafka", "Broker de integración para eventos que cruzan bounded contexts.")
+System_Ext(other_contexts, "Otros bounded contexts de Vankoo", "Servicios que consumen eventos públicos de Finance.")
+
+Rel(client, api_gateway, "Usa", "HTTPS")
+Rel(api_gateway, finance, "Enruta comandos, queries y webhooks", "HTTPS/JSON")
+Rel(finance, stripe, "Crea y consulta pagos", "HTTPS")
+Rel(stripe, finance, "Envía webhooks", "HTTPS")
+Rel(finance, kafka, "Publica eventos públicos de pagos", "Kafka/JSON")
+Rel(kafka, other_contexts, "Entrega eventos de integración", "Kafka")
+
+SHOW_LEGEND()
+
+@enduml

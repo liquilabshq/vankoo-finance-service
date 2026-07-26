@@ -1,0 +1,62 @@
+@startuml finance-c4-components
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_LEFT_RIGHT()
+LAYOUT_WITH_LEGEND()
+
+title C4 - Componentes de Finance Service
+
+Person_Ext(client, "Cliente de Vankoo", "Persona o aplicación que inicia pagos y consulta su estado.")
+System_Ext(api_gateway, "Vankoo API Gateway", "Autentica y enruta las solicitudes externas.")
+System_Ext(stripe, "Stripe", "Proveedor externo de pagos y webhooks.")
+System_Ext(axon_server, "Axon Server", "Event Store y router interno de Axon.")
+System_Ext(kafka, "Kafka", "Broker de integración entre bounded contexts.")
+ContainerDb(read_model, "Finance Read Model", "PostgreSQL", "Proyección durable de pagos.")
+
+Container_Boundary(finance_service, "Finance Service - Spring Boot") {
+    Component(payment_api, "Payment REST Controller", "interfaces", "Recibe solicitudes HTTP, valida el formato y delega comandos/query services.")
+    Component(webhook_api, "Payment Webhook Controller", "interfaces", "Recibe el payload y la firma del proveedor sin llevar reglas de negocio.")
+
+    Component(command_service, "Payment Command Service", "application", "Coordina casos de uso y envía comandos al agregado Payment.")
+    Component(query_service, "Payment Query Service", "application", "Ejecuta consultas sobre el Read Model sin reconstruir agregados.")
+    Component(webhook_service, "Payment Webhook Service", "application", "Orquesta la verificación del proveedor y traduce la actualización a un comando de Finance.")
+    Component(payment_provider_port, "PaymentProvider Port", "application", "Contrato propio para crear, consultar y verificar pagos externos.")
+
+    Component(payment_aggregate, "Payment Aggregate", "domain", "Valida invariantes y transiciones del ciclo de vida del pago.")
+    Component(domain_events, "Payment Domain Events", "domain", "PaymentInitiated, PaymentSucceeded, PaymentFailed y otros hechos de negocio.")
+
+    Component(axon_adapter, "Axon Event-Sourcing Adapter", "infrastructure", "Conecta comandos/agregado con Axon Server y configura el routing por paymentId.")
+    Component(event_processor, "Payment Event Processor", "infrastructure", "Consume el historial de Axon Server y distribuye eventos a las proyecciones y al publicador.")
+    Component(read_projection, "Payment Read Model Projection", "infrastructure", "Actualiza payment_view e índices de resolución/idempotencia de forma reconstruible.")
+    Component(kafka_publisher, "Kafka Integration Publisher", "infrastructure", "Publica el mismo payload de los eventos de dominio públicos con headers versionados.")
+    Component(stripe_adapter, "Stripe Payment Provider", "infrastructure", "Implementa PaymentProvider y traduce Stripe a modelos y estados de Finance.")
+}
+
+Rel(client, api_gateway, "Usa", "HTTPS")
+Rel(api_gateway, payment_api, "Enruta commands y queries", "HTTPS/JSON")
+Rel(api_gateway, webhook_api, "Enruta webhooks", "HTTPS")
+
+Rel(payment_api, command_service, "Invoca casos de uso")
+Rel(payment_api, query_service, "Invoca queries")
+Rel(webhook_api, webhook_service, "Entrega payload y firma")
+Rel(webhook_service, payment_provider_port, "Solicita verificación y normalización")
+Rel(webhook_service, command_service, "Envía ApplyProviderPaymentUpdateCommand")
+Rel(stripe_adapter, payment_provider_port, "Implementa")
+Rel(command_service, payment_provider_port, "Solicita operaciones externas")
+Rel(command_service, axon_adapter, "Envía comandos")
+Rel(axon_adapter, payment_aggregate, "Carga y dirige comandos")
+Rel(axon_adapter, axon_server, "Persiste/reproduce eventos y enruta comandos", "Axon Protocol")
+Rel(payment_aggregate, domain_events, "Emite")
+Rel(domain_events, axon_adapter, "Entrega eventos para persistencia")
+Rel(axon_server, event_processor, "Entrega el stream de eventos", "Axon Event Stream")
+Rel(event_processor, read_projection, "Entrega eventos de proyección")
+Rel(read_projection, read_model, "Actualiza", "SQL")
+Rel(query_service, read_model, "Consulta", "SQL")
+Rel(event_processor, kafka_publisher, "Entrega eventos públicos")
+Rel(kafka_publisher, kafka, "Publica eventos de integración", "Kafka/JSON")
+Rel(stripe, stripe_adapter, "Crea/consulta pagos y envía webhooks", "HTTPS")
+
+SHOW_LEGEND()
+
+@enduml

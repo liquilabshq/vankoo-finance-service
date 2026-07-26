@@ -1,0 +1,32 @@
+@startuml finance-c4-containers
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_LEFT_RIGHT()
+LAYOUT_WITH_LEGEND()
+
+title C4 - Containers de Vankoo Finance
+
+Person_Ext(client, "Cliente de Vankoo", "Persona o aplicación que inicia pagos y consulta su estado.")
+System_Ext(api_gateway, "Vankoo API Gateway", "Autentica y enruta las solicitudes externas.")
+System_Ext(stripe, "Stripe", "Proveedor externo de pagos y webhooks.")
+System_Ext(axon_server, "Axon Server", "Event Store y router interno de comandos/eventos para las instancias de Finance.")
+System_Ext(kafka, "Kafka", "Broker de eventos de integración entre bounded contexts.")
+System_Ext(other_contexts, "Otros bounded contexts de Vankoo", "Consumidores de eventos públicos de Finance.")
+
+System_Boundary(finance_system, "Vankoo Finance") {
+    Container(finance_service, "Finance Service", "Spring Boot + Axon Framework", "Único microservicio desplegable. Recibe comandos y webhooks, ejecuta el agregado Payment, proyecta eventos y publica eventos públicos.")
+    ContainerDb(read_model, "Finance Read Model", "PostgreSQL", "Proyección durable y reconstruible para consultas de pagos. No es la fuente de verdad.")
+}
+
+Rel(client, api_gateway, "Usa", "HTTPS")
+Rel(api_gateway, finance_service, "Enruta comandos, queries y webhooks", "HTTPS/JSON")
+Rel(finance_service, axon_server, "Persiste/reproduce eventos y enruta comandos", "Axon Protocol")
+Rel(finance_service, read_model, "Actualiza proyecciones y ejecuta queries", "SQL")
+Rel(finance_service, stripe, "Crea/consulta pagos y verifica webhooks", "HTTPS")
+Rel(finance_service, kafka, "Publica eventos de dominio públicos", "Kafka/JSON")
+Rel(kafka, other_contexts, "Entrega eventos de integración", "Kafka")
+
+SHOW_LEGEND()
+
+@enduml
