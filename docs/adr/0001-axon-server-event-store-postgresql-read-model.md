@@ -142,8 +142,10 @@ consultas.
 
 ## Decisiones pendientes derivadas
 
-- Catálogo inicial de agregados, comandos y eventos.
-- Identificación de los eventos de dominio que también serán contratos Kafka.
+- Catálogo inicial de agregados, comandos y eventos, definido en
+  [`docs/contracts/finance-contracts.md`](../contracts/finance-contracts.md).
+- Identificación de los eventos de dominio que también serán contratos Kafka,
+  definida en el catálogo de contratos.
 - Convención de nombres, esquema y versionado de eventos.
 - Estrategia de snapshots y replay.
 - Configuración de proyecciones, token store, reintentos y dead-letter queue.
