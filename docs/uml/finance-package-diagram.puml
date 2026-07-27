@@ -1,0 +1,102 @@
+@startuml finance-package-diagram
+
+package vankoo-finance-service as vankoo_finance_service {
+    package finance {
+        package domain {
+            package model {
+                package aggregates {}
+                package entities {}
+                package commands {}
+                package queries {}
+                package events {}
+                package valueobjects {}
+                package exceptions {}
+            }
+            package services {}
+        }
+        package infrastructure {
+            package eventstore {
+                package axon {}
+            }
+            package persistence {
+                package jpa {
+                    package repositories {}
+                }
+            }
+            package brokers {
+                package kafka {}
+            }
+            package providers {
+                package stripe {}
+            }
+            package configuration {}
+        }
+        package application.internal {
+            package commandservices {}
+            package queryservices {}
+            package outboundservices {}
+        }
+        package interfaces {
+            package rest {
+                package controllers {}
+                package webhooks {}
+                package resources {}
+                package transform {}
+            }
+            package messaging {
+                package eventhandlers {}
+            }
+        }
+    }
+}
+package org.axonframework.modelling {}
+package org.springframework.web {}
+package com.stripe.model {}
+
+aggregates ..> org.axonframework.modelling
+aggregates ..> commands
+aggregates ..> events
+aggregates ..> entities
+aggregates ..> valueobjects
+aggregates ..> exceptions
+entities ..> valueobjects
+events ..> valueobjects
+
+services ..> commands
+services ..> queries
+services ..> aggregates
+
+commandservices ..|> services
+commandservices ..> aggregates
+commandservices ..> commands
+commandservices ..> outboundservices
+commandservices ..> axon
+queryservices ..|> services
+queryservices ..> queries
+queryservices ..> events
+queryservices ..> repositories
+outboundservices ..> events
+outboundservices ..> kafka
+
+axon ..> aggregates
+kafka ..> events
+configuration ..> axon
+configuration ..> repositories
+eventhandlers ..> commandservices
+vankoo_finance_service.finance.infrastructure.providers.stripe ..> outboundservices
+vankoo_finance_service.finance.infrastructure.providers.stripe ..> valueobjects
+vankoo_finance_service.finance.infrastructure.providers.stripe ..> com.stripe.model
+
+controllers ..> resources
+controllers ..> transform
+controllers ..> commandservices
+controllers ..> queryservices
+controllers ..> org.springframework.web
+webhooks ..> resources
+webhooks ..> commandservices
+webhooks ..> org.springframework.web
+transform ..> resources
+transform ..> commands
+transform ..> queries
+
+@enduml

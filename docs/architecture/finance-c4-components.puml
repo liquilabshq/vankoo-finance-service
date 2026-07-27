@@ -1,0 +1,99 @@
+@startuml finance-c4-components
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C4 - Componentes de Finance Service (v1: recarga de saldo)
+
+Person(mype, "MYPE", "Usa la aplicación web de Vankoo.")
+Person(investor, "Inversionista", "Usa la aplicación móvil de Vankoo.")
+System_Ext(stripe, "Stripe", "Proveedor externo de cobros y webhooks.")
+
+Container(web_app, "Vankoo Web App", "Angular", "Aplicación web usada por las MYPE.")
+Container(mobile_app, "Vankoo Mobile App", "Kotlin Multiplatform", "Aplicación móvil usada por los inversionistas.")
+Container(api_gateway, "Vankoo API Gateway", "Spring Cloud Gateway", "Autentica y redirige solicitudes y webhooks.")
+Container(axon_server, "Axon Server", "Axon Server", "Event Store y router interno de Axon.")
+ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker de integración entre bounded contexts.")
+ContainerDb(finance_db, "Finance Database", "PostgreSQL", "Schema finance_read_model (deposit_view) y schema finance_ops (inbox, idempotencia, referencias).")
+
+Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 5") {
+
+    ' ---------- interfaces ----------
+    Component(deposit_api, "Deposit REST Controller", "interfaces.rest.controllers", "Recibe HTTP, valida el formato y delega en los command/query services.")
+    Component(webhook_api, "Provider Webhook Controller", "interfaces.rest.webhooks", "Recibe el payload crudo y la firma del proveedor. No lleva reglas de negocio.")
+    Component(assemblers, "DTO Assemblers", "interfaces.rest.transform", "Traduce resources HTTP a comandos y queries de aplicación.")
+
+    ' ---------- application ----------
+    Component(command_service, "Deposit Command Service", "application.internal.commandservices", "Caso de uso de escritura: resuelve idempotencia y envía comandos al agregado Deposit.")
+    Component(query_service, "Deposit Query Service", "application.internal.queryservices", "@QueryHandler de GetDepositById y ListDepositsByAccount. Lee el Read Model sin reconstruir agregados.")
+    Component(webhook_service, "Webhook Inbox Service", "application.internal.commandservices", "Deduplica, resuelve el depositId, aparca los webhooks anticipados y los traduce a comandos.")
+    Component(provider_port, "PaymentProvider Port", "application.internal.outboundservices", "Contrato propio para crear, consultar y verificar cobros externos.")
+
+    ' ---------- domain ----------
+    Component(deposit_aggregate, "Deposit Aggregate", "domain.model.aggregates", "@EventSourcedEntity(tagKey=depositId). Valida invariantes en el command handler antes de emitir.")
+    Component(domain_events, "Deposit Domain Events", "domain.model.events", "DepositInitiated, DepositSucceeded, DepositFailed y demás hechos de negocio, con @EventTag.")
+
+    ' ---------- infrastructure ----------
+    Component(axon_config, "Axon Event-Sourcing Config", "infrastructure.eventstore.axon", "Conecta el agregado con Axon Server y configura el routing por depositId.")
+    Component(event_processor, "Deposit Event Processor", "infrastructure.eventstore.axon", "Consume el stream de Axon Server y distribuye eventos a la proyección y al publicador.")
+    Component(read_projection, "Deposit Projection", "application.internal.queryservices", "@ProcessingGroup(deposit-read-model). @EventHandler que construye deposit_view de forma idempotente y reconstruible por replay.")
+    Component(ops_repository, "Ops Repositories", "infrastructure.persistence.jpa.repositories", "Acceso JPA al inbox de webhooks, idempotencia de comandos y referencias del proveedor.")
+    Component(kafka_publisher, "Deposit Event Publisher", "application.internal.outboundservices", "@EventHandler que decide qué eventos son contratos públicos y los envía al canal Kafka.")
+    Component(kafka_binding, "Kafka Channel Binding", "infrastructure.brokers.kafka", "Productor, serialización y declaración de canales. Sin lógica de selección de eventos.")
+    Component(stripe_adapter, "Stripe Payment Provider", "infrastructure.providers.stripe", "Implementa PaymentProvider, verifica firmas y traduce Stripe a estados de Finance.")
+}
+
+' ---------- entrada ----------
+Rel(mype, web_app, "Usa", "HTTPS")
+Rel(investor, mobile_app, "Usa", "HTTPS")
+Rel(web_app, api_gateway, "Consume la API", "HTTPS/JSON")
+Rel(mobile_app, api_gateway, "Consume la API", "HTTPS/JSON")
+Rel(api_gateway, deposit_api, "Enruta commands y queries", "HTTPS/JSON")
+Rel(stripe, api_gateway, "Envía webhooks", "HTTPS")
+Rel(api_gateway, webhook_api, "Enruta webhooks", "HTTPS")
+
+' ---------- interfaces -> application ----------
+Rel(deposit_api, assemblers, "Traduce resources")
+Rel(assemblers, command_service, "Construye comandos")
+Rel(assemblers, query_service, "Construye queries")
+Rel(webhook_api, webhook_service, "Entrega payload crudo y firma")
+
+' ---------- application ----------
+Rel(webhook_service, provider_port, "Verifica firma y normaliza el evento")
+Rel(webhook_service, ops_repository, "Deduplica, aparca y resuelve depositId")
+Rel(webhook_service, command_service, "Envía ApplyProviderDepositUpdateCommand")
+Rel(command_service, ops_repository, "Comprueba Idempotency-Key")
+Rel(command_service, provider_port, "Solicita la creación del cobro externo")
+Rel(command_service, axon_config, "Envía comandos")
+Rel(stripe_adapter, provider_port, "Implementa")
+
+' ---------- escritura ----------
+Rel(axon_config, deposit_aggregate, "Carga por EventCriteria y dirige comandos")
+Rel(deposit_aggregate, domain_events, "Emite vía EventAppender")
+Rel(domain_events, axon_config, "Se anexan al event store")
+Rel(axon_config, axon_server, "Persiste/reproduce eventos y enruta comandos", "Axon Protocol")
+
+' ---------- lectura ----------
+Rel(axon_server, event_processor, "Entrega el stream de eventos", "Axon Event Stream")
+Rel(event_processor, read_projection, "Entrega eventos de proyección")
+Rel(event_processor, kafka_publisher, "Entrega eventos públicos")
+Rel(read_projection, finance_db, "Escribe deposit_view", "SQL · finance_read_model")
+Rel(query_service, finance_db, "Lee deposit_view", "SQL · finance_read_model")
+Rel(ops_repository, finance_db, "Deduplica, aparca y resuelve", "SQL · finance_ops")
+Rel(kafka_publisher, kafka_binding, "Envía al canal")
+Rel(kafka_binding, kafka, "Publica eventos de integración", "Kafka/JSON")
+
+' ---------- salida al proveedor ----------
+Rel(stripe_adapter, stripe, "Crea y consulta cobros", "HTTPS")
+
+note right of deposit_aggregate
+  Invariantes en el @CommandHandler,
+  ANTES de emitir el evento.
+  El @EventSourcingHandler solo
+  asigna estado y nunca lanza.
+end note
+
+SHOW_LEGEND()
+
+@enduml

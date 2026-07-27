@@ -1,0 +1,35 @@
+@startuml finance-c4-context
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_LEFT_RIGHT()
+LAYOUT_WITH_LEGEND()
+
+title C4 - Contexto de Vankoo Finance (v1: recarga de saldo)
+
+Person(investor, "Inversionista", "Recarga saldo en su monedero de Vankoo desde la aplicación móvil.")
+Person(mype, "MYPE", "Consulta sus operaciones desde la aplicación web. En la v1 no origina recargas.")
+
+System_Boundary(vankoo, "Plataforma Vankoo") {
+    System(finance, "Vankoo Finance Service", "Bounded Context responsable del ciclo de vida de las recargas de saldo (agregado Deposit) y sus eventos de negocio.")
+}
+
+System_Ext(stripe, "Stripe", "Proveedor externo que crea el recurso de cobro y envía webhooks de confirmación.")
+
+Rel(investor, finance, "Inicia y consulta recargas de saldo")
+Rel(mype, finance, "Consulta operaciones financieras")
+Rel(finance, stripe, "Crea y consulta cobros", "HTTPS")
+Rel(stripe, finance, "Envía webhooks de estado", "HTTPS")
+
+note bottom of finance
+  Alcance v1: la recarga termina en
+  DepositSucceededEvent y NO acredita saldo.
+  Wallet/Ledger será un SEGUNDO AGREGADO
+  dentro de este mismo bounded context,
+  no otro sistema. Recibirá el evento por
+  el event bus interno de Axon.
+end note
+
+SHOW_LEGEND()
+
+@enduml
