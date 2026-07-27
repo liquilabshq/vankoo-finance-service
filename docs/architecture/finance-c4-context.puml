@@ -24,8 +24,10 @@ Rel(stripe, finance, "Envía webhooks de estado", "HTTPS")
 note bottom of finance
   Alcance v1: la recarga termina en
   DepositSucceededEvent y NO acredita saldo.
-  El agregado Wallet/Ledger es el contrato
-  siguiente y aún no existe como sistema.
+  Wallet/Ledger será un SEGUNDO AGREGADO
+  dentro de este mismo bounded context,
+  no otro sistema. Recibirá el evento por
+  el event bus interno de Axon.
 end note
 
 SHOW_LEGEND()

@@ -1,0 +1,343 @@
+@startuml finance-domain-model-diagram
+
+left to right direction
+
+title Vankoo Finance: Deposit Domain Model Diagram
+
+skinparam class {
+    BackgroundColor<<Aggregate Root>> #FFFFFF/B3E5FC
+    BackgroundColor<<Entity>> #FFFFFF/C8E6C9
+    BackgroundColor<<Value Object>> #FFFFFF/FFF9C4
+    BackgroundColor<<Command>> #FFFFFF/D1C4E9
+    BackgroundColor<<Query>> #FFFFFF/B2DFDB
+    BackgroundColor<<Domain Event>> #FFFFFF/FFCDD2
+    BackgroundColor<<Domain Exception>> #FFFFFF/FFE0B2
+    BackgroundColor<<Domain Service>> #FFFFFF/FFCCBC
+    BackgroundColor<<Query Result>> #FFFFFF/E1BEE7
+    BorderColor #212121
+    ArrowColor #212121
+    FontSize 14
+}
+
+skinparam interface {
+    BackgroundColor #FFFFFF/FFCCBC
+    BorderColor #212121
+    ArrowColor #212121
+    FontSize 14
+}
+
+package "Finance Context" {
+  package "Domain Layer" {
+
+    package "model.aggregates" {
+        class "Deposit" <<(A, #27D3F5) Aggregate Root>> {
+            - depositId : DepositId
+            - accountId : AccountId
+            - amount : Money
+            - provider : Provider
+            - providerDepositId : ProviderDepositId
+            - status : DepositStatus
+            - failureReason : FailureReason
+            # Deposit()
+            + {static} handle(command : InitiateDepositCommand, events : EventAppender) : String
+            + handle(command : RegisterDepositProviderReferenceCommand, events : EventAppender) : void
+            + handle(command : ApplyProviderDepositUpdateCommand, events : EventAppender) : void
+            + on(event : DepositInitiatedEvent) : void
+            + on(event : DepositProviderReferenceRegisteredEvent) : void
+            + on(event : DepositSucceededEvent) : void
+            + on(event : DepositFailedEvent) : void
+            - assertNotTerminal() : void
+            - assertProviderReferenceMatches(reference : ProviderDepositId) : void
+        }
+
+    }
+
+    package "model.valueobjects" {
+        class "DepositId" <<(V, #FFD700) Value Object>> {
+            - value : UUID
+            + DepositId(value : UUID)
+            + {static} newId() : DepositId
+            + getValue() : UUID
+        }
+
+        class "AccountId" <<(V, #FFD700) Value Object>> {
+            - value : UUID
+            + AccountId(value : UUID)
+            + getValue() : UUID
+        }
+
+        class "Money" <<(V, #FFD700) Value Object>> {
+            - amountMinor : long
+            - currency : Currency
+            + Money(amountMinor : long, currency : Currency)
+            + isPositive() : boolean
+            + getAmountMinor() : long
+        }
+
+        class "Currency" <<(V, #FFD700) Value Object>> {
+            PEN
+            --
+            + isSupported() : boolean
+            + getIsoCode() : String
+        }
+
+        class "Provider" <<(V, #FFD700) Value Object>> {
+            STRIPE
+            --
+            + isStripe() : boolean
+        }
+
+        class "ProviderDepositId" <<(V, #FFD700) Value Object>> {
+            - value : String
+            + ProviderDepositId(value : String)
+            + getValue() : String
+        }
+
+        class "ProviderEventId" <<(V, #FFD700) Value Object>> {
+            - value : String
+            + ProviderEventId(value : String)
+            + getValue() : String
+        }
+
+        class "IdempotencyKey" <<(V, #FFD700) Value Object>> {
+            - value : String
+            + IdempotencyKey(value : String)
+            + getValue() : String
+        }
+
+        class "DepositStatus" <<(V, #FFD700) Value Object>> {
+            PENDING
+            ACTION_REQUIRED
+            PROCESSING
+            SUCCEEDED
+            FAILED
+            CANCELLED
+            --
+            + isTerminal() : boolean
+            + canTransitionTo(target : DepositStatus) : boolean
+        }
+
+        class "FailureReason" <<(V, #FFD700) Value Object>> {
+            DECLINED
+            EXPIRED
+            INVALID_PAYMENT_METHOD
+            PROVIDER_ERROR
+            UNKNOWN
+            --
+            + isRetryable() : boolean
+        }
+
+    }
+
+    package "model.commands" {
+        class "InitiateDepositCommand" <<(C, #9575CD) Command>> {
+            + depositId : DepositId
+            + accountId : AccountId
+            + amount : Money
+            + provider : Provider
+            + idempotencyKey : IdempotencyKey
+            + requestedAt : Instant
+            + description : String
+        }
+
+        class "RegisterDepositProviderReferenceCommand" <<(C, #9575CD) Command>> {
+            + depositId : DepositId
+            + provider : Provider
+            + providerDepositId : ProviderDepositId
+            + actionUrl : String
+            + registeredAt : Instant
+        }
+
+        class "ApplyProviderDepositUpdateCommand" <<(C, #9575CD) Command>> {
+            + depositId : DepositId
+            + provider : Provider
+            + providerDepositId : ProviderDepositId
+            + providerEventId : ProviderEventId
+            + status : DepositStatus
+            + failureReason : FailureReason
+            + observedAt : Instant
+        }
+
+    }
+
+    package "model.queries" {
+        class "GetDepositByIdQuery" <<(Q, #4DB6AC) Query>> {
+            + depositId : DepositId
+        }
+
+        class "ListDepositsByAccountQuery" <<(Q, #4DB6AC) Query>> {
+            + accountId : AccountId
+            + status : DepositStatus
+            + page : int
+            + size : int
+        }
+
+        class "DepositSummary" <<(R, #BA68C8) Query Result>> {
+            + depositId : DepositId
+            + accountId : AccountId
+            + amount : Money
+            + provider : Provider
+            + providerDepositId : ProviderDepositId
+            + status : DepositStatus
+            + failureReason : FailureReason
+            + actionUrl : String
+            + createdAt : Instant
+            + updatedAt : Instant
+        }
+
+    }
+
+    package "model.events" {
+        class "DepositInitiatedEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + accountId : String
+            + amountMinor : long
+            + currency : String
+            + provider : Provider
+        }
+
+        class "DepositProviderReferenceRegisteredEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + provider : Provider
+            + providerDepositId : String
+            + actionUrl : String
+        }
+
+        class "DepositActionRequiredEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + provider : Provider
+            + actionUrl : String
+        }
+
+        class "DepositProcessingStartedEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + provider : Provider
+        }
+
+        class "DepositSucceededEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + accountId : String
+            + amountMinor : long
+            + currency : String
+            + provider : Provider
+        }
+
+        class "DepositFailedEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + accountId : String
+            + amountMinor : long
+            + currency : String
+            + provider : Provider
+            + failureReason : FailureReason
+        }
+
+        class "DepositCancelledEvent" <<(D, #EF5350) Domain Event>> {
+            + depositId : String
+            + provider : Provider
+            + cancellationReason : String
+        }
+
+    }
+
+    package "model.exceptions" {
+        class "InvalidDepositAmountException" <<(X, #FB8C00) Domain Exception>> {
+            + InvalidDepositAmountException(amount : Money)
+        }
+
+        class "UnsupportedCurrencyException" <<(X, #FB8C00) Domain Exception>> {
+            + UnsupportedCurrencyException(currency : Currency)
+        }
+
+        class "ProviderReferenceMismatchException" <<(X, #FB8C00) Domain Exception>> {
+            + ProviderReferenceMismatchException(expected : ProviderDepositId, actual : ProviderDepositId)
+        }
+
+        class "TerminalStateTransitionException" <<(X, #FB8C00) Domain Exception>> {
+            + TerminalStateTransitionException(current : DepositStatus, target : DepositStatus)
+        }
+    }
+
+    package "services" {
+        interface "DepositCommandService" <<(S, #FF8A65) Domain Service>> {
+            + handle(command : InitiateDepositCommand) : DepositId
+            + handle(command : RegisterDepositProviderReferenceCommand) : void
+            + handle(command : ApplyProviderDepositUpdateCommand) : void
+        }
+
+        interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
+            + handle(query : GetDepositByIdQuery) : DepositSummary
+            + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
+        }
+    }
+  }
+}
+
+' Aggregate composition
+Deposit "1" *-- "1" Money : holds >
+
+' Value object associations
+Deposit --> DepositId : identified by >
+Deposit --> AccountId : credits >
+Deposit --> Provider : settled through >
+Deposit "1" --> "0..1" ProviderDepositId : references >
+Deposit --> DepositStatus : has >
+Deposit "1" --> "0..1" FailureReason : records >
+Money --> Currency : denominated in >
+
+' Commands handled by the aggregate
+Deposit ..> InitiateDepositCommand : handles >
+Deposit ..> RegisterDepositProviderReferenceCommand : handles >
+Deposit ..> ApplyProviderDepositUpdateCommand : handles >
+ApplyProviderDepositUpdateCommand --> ProviderEventId : deduplicated by >
+InitiateDepositCommand --> IdempotencyKey : deduplicated by >
+
+' Domain events emitted by the aggregate
+Deposit ..> DepositInitiatedEvent : emits >
+Deposit ..> DepositProviderReferenceRegisteredEvent : emits >
+Deposit ..> DepositActionRequiredEvent : emits >
+Deposit ..> DepositProcessingStartedEvent : emits >
+Deposit ..> DepositSucceededEvent : emits >
+Deposit ..> DepositFailedEvent : emits >
+Deposit ..> DepositCancelledEvent : emits >
+
+' Business rule violations
+Deposit ..> InvalidDepositAmountException : rejects with >
+Deposit ..> UnsupportedCurrencyException : rejects with >
+Deposit ..> ProviderReferenceMismatchException : rejects with >
+Deposit ..> TerminalStateTransitionException : rejects with >
+
+' Queries resolved against the read model, not the aggregate
+GetDepositByIdQuery --> DepositId : filters by >
+ListDepositsByAccountQuery --> AccountId : filters by >
+
+' Domain service interfaces: declared here, implemented in application/internal
+DepositCommandService ..> InitiateDepositCommand : handles >
+DepositCommandService ..> RegisterDepositProviderReferenceCommand : handles >
+DepositCommandService ..> ApplyProviderDepositUpdateCommand : handles >
+DepositCommandService ..> Deposit : dispatches to >
+DepositQueryService ..> GetDepositByIdQuery : handles >
+DepositQueryService ..> ListDepositsByAccountQuery : handles >
+DepositQueryService ..> DepositSummary : returns >
+
+legend bottom
+  <b>No repository for the aggregate.</b> Deposit is event-sourced: it is rehydrated by
+  replaying its events, never loaded from a table. There is no Deposit.save().
+
+  <b>No child entities in the v1.</b> Every attribute is a value object.
+  domain/model/entities exists and is available when one appears.
+
+  <b>Deposit is the only aggregate in the v1.</b> Wallet/Ledger will be a second aggregate
+  in this same bounded context and will appear in this diagram. It will consume
+  DepositSucceededEvent through the internal Axon event bus, not through Kafka.
+
+  <b>Only the service interfaces live in the domain layer.</b> The implementations live in
+  application/internal/{commandservices, queryservices}. Queries are resolved against
+  the PostgreSQL read model, so they never rehydrate the aggregate: DepositQueryService
+  returns DepositSummary, not Deposit.
+
+  <b>Domain events carry identifiers as plain String</b>, not as value objects: they are
+  serialized into the event store and must stay stable across upcasting. The aggregate
+  rebuilds the value objects in its @EventSourcingHandler methods.
+endlegend
+
+@enduml

@@ -53,9 +53,9 @@ proveedor y tienen un ciclo de vida distinto).
 
 ```text
 Deposit  ──►  ...  ──►  DepositSucceededEvent      ← aquí termina la v1
-                                │  (Kafka)
+                                │  (event bus interno de Axon)
                                 ▼
-                     Wallet / Ledger  (contrato siguiente)
+                     Wallet / Ledger  (segundo agregado, contrato siguiente)
 ```
 
 `Deposit` **no acredita saldo**. Solo registra que entró dinero y que el
@@ -64,8 +64,17 @@ proveedor lo confirmó.
 El saldo es una invariante de negocio: «no puedes invertir más de lo que
 tienes». Una invariante no puede validarse contra una proyección, y el saldo
 además lo mueven las inversiones y los retiros, no solo las recargas. Por tanto
-el saldo debe vivir en su propio agregado event-sourced (`Wallet` o `Ledger`),
-que consumirá `DepositSucceededEvent` como hecho de entrada.
+el saldo debe vivir en su propio agregado event-sourced (`Wallet` o `Ledger`).
+
+**`Wallet` será un segundo agregado dentro del bounded context Finance**, no otro
+microservicio. Vankoo sigue la regla «1 microservicio = 1 bounded context», y
+saldo y recargas comparten la misma invariante contable: separarlos obligaría a
+coordinar dos servicios para acreditar una recarga, con consistencia eventual en
+algo que queremos transaccional.
+
+Consecuencia directa: `DepositSucceededEvent` llegará a `Wallet` por el **event
+bus interno de Axon**, no por Kafka. Kafka sigue reservado para cruzar la
+frontera del bounded context hacia otros servicios de Vankoo.
 
 > **Consecuencia asumida:** en la v1, una recarga exitosa **no deja saldo
 > utilizable** para el inversionista. Es una rebanada vertical completa y
@@ -435,8 +444,15 @@ En la primera versión se publican como eventos de integración:
 `DepositProviderReferenceRegisteredEvent` es interno: expone una referencia del
 proveedor y no representa un hecho que otros bounded contexts deban consumir.
 
-El consumidor principal previsto de `DepositSucceededEvent` es el futuro
-bounded context de monedero/ledger.
+> **Kafka en la v1 no tiene consumidor todavía.** El consumidor natural de
+> `DepositSucceededEvent` es `Wallet`, y `Wallet` vive **dentro** de Finance, así
+> que lo recibirá por el event bus de Axon. Los consumidores externos llegarán
+> cuando otros servicios de Vankoo necesiten estos hechos.
+>
+> Se mantiene la publicación desde la v1 para fijar el contrato antes de que
+> exista el primer consumidor, no porque haya uno. Conviene tenerlo presente al
+> priorizar: la Tarjeta 8 entrega infraestructura que nadie consume aún, y podría
+> posponerse sin bloquear ningún flujo de producto.
 
 La regla es: un evento de dominio público y su evento de integración comparten
 el mismo payload de negocio. No se publican mensajes técnicos de Axon, clases
@@ -542,6 +558,42 @@ Las consultas no reconstruyen el agregado desde el Event Store. Leen el Read
 Model y aceptan consistencia eventual después de un comando o una proyección
 reprocesada.
 
+### Los tres tipos del lado de lectura
+
+Una consulta atraviesa tres tipos distintos, uno por capa. Se documentan porque
+sus nombres se parecen y confundirlos es fácil:
+
+| Tipo | Capa | Qué es | Cambia cuando… |
+|---|---|---|---|
+| `DepositViewEntity` | `infrastructure/persistence/jpa` | la `@Entity` que mapea la tabla `deposit_view`, con `last_event_id` y `projection_version` | cambia el almacén |
+| `DepositSummary` | `domain/model/queries` | qué datos pide el negocio, compuesto de value objects | cambia el negocio |
+| `DepositResource` | `interfaces/rest/resources` | el JSON de la respuesta HTTP | cambia el contrato de la API |
+
+**«Read Model» se reserva para el almacén**, nunca para un tipo Java. Es el
+vocabulario de la guía, que rotula la caja de la figura 6-7 como *"Read Model
+(Traditional Datastore)"*.
+
+El mapeo columna ↔ value object se declara **una sola vez** con
+`AttributeConverter` de JPA en `infrastructure/persistence/jpa/converters`, para
+que los value objects de dominio no lleven ninguna anotación de JPA y para no
+escribir el mapeo query por query.
+
+> **Decisión abierta.** Esta separación en tres tipos está sujeta a revisión.
+> La alternativa es que `DepositQueryService` viva solo en `application` y
+> devuelva directamente la `@Entity`, quedándose en dos tipos. Es más ligero y
+> es lo que sugiere la figura 6-7, que no modela ningún tipo de retorno.
+>
+> Se elige la separación en tres porque la interfaz del query service vive en
+> `domain/services` —siguiendo el modelo de referencia de la clase— y el dominio
+> no puede depender de infraestructura. La alternativa además añadiría una
+> arista `interfaces → infrastructure`, que hoy no existe, y expondría la
+> `@Entity` a la serialización JSON.
+>
+> Si al implementar la Tarjeta 4 el tercer tipo resulta puro peso muerto, la
+> salida es mover `DepositQueryService` fuera del dominio y borrar
+> `DepositSummary`. Ninguna de las dos opciones afecta a los eventos, al event
+> store ni a los contratos de Kafka.
+
 ### HTTP como adaptador
 
 Los nombres de ruta son contratos lógicos y pueden recibir un prefijo del API
@@ -592,14 +644,15 @@ com.liquilabs.vankoo.finance
 │       ├── queryservices/     # proyección (@EventHandler) + query handlers
 │       └── outboundservices/  # PaymentProvider port, ACL, publicador de eventos
 ├── domain/
-│   └── model/
-│       ├── aggregates/    # Deposit
-│       ├── entities/      # entidades hijas del agregado (ninguna en la v1)
-│       ├── commands/      # InitiateDepositCommand, ...
-│       ├── queries/       # GetDepositById, ListDepositsByAccount
-│       ├── events/        # DepositInitiatedEvent, ...
-│       ├── valueobjects/  # DepositId, AccountId, Money, DepositStatus, ...
-│       └── exceptions/    # excepciones de negocio
+│   ├── model/
+│   │   ├── aggregates/    # Deposit
+│   │   ├── entities/      # entidades hijas del agregado (ninguna en la v1)
+│   │   ├── commands/      # InitiateDepositCommand, ...
+│   │   ├── queries/       # GetDepositByIdQuery, ListDepositsByAccountQuery, DepositSummary
+│   │   ├── events/        # DepositInitiatedEvent, ...
+│   │   ├── valueobjects/  # DepositId, AccountId, Money, DepositStatus, ...
+│   │   └── exceptions/    # excepciones de negocio
+│   └── services/          # SOLO interfaces: DepositCommandService, DepositQueryService
 └── infrastructure/                # eje de clasificación: rol, luego tecnología
     ├── eventstore/axon/           # conexión, serializer, token store, event processors
     ├── persistence/jpa/
@@ -640,6 +693,18 @@ Equivalencias y reglas de dependencia:
 
 - `outboundservices` es el nombre de la guía para lo que también llamamos
   «puertos de salida». Se conserva el nombre de la guía.
+- **`domain/services` contiene solo interfaces**, y `application/internal/
+  {commandservices, queryservices}` sus implementaciones. El dominio declara el
+  contrato de los casos de uso; la aplicación lo cumple. `DepositQueryService`
+  devuelve `DepositSummary`, no `Deposit`: las consultas leen el read model y
+  nunca rehidratan el agregado.
+- **Convención de nombres de resources HTTP:** `CreateXResource` para el request,
+  `XResource` para el response. Así, `POST /v1/deposits` recibe un
+  `CreateDepositResource` y `GET /v1/deposits/{id}` devuelve un `DepositResource`.
+- **No hay interfaz de repositorio en el dominio**, a diferencia del modelo de
+  referencia. El agregado es event-sourced y no se carga de una tabla, y el read
+  model no es un concepto de dominio: su acceso JPA vive en
+  `infrastructure/persistence/jpa/repositories`.
 - **Hay tres roles de event handler, y la guía clasifica por dirección, no por
   autoría del evento.** Cada uno tiene un ejemplo concreto que lo respalda:
 
@@ -674,8 +739,9 @@ Equivalencias y reglas de dependencia:
   Stripe.
 
 Los diagramas correspondientes son
-[`uml/finance-package-diagram.puml`](../uml/finance-package-diagram.puml) y
-[`uml/finance-layers-diagram.puml`](../uml/finance-layers-diagram.puml).
+[`uml/finance-package-diagram.puml`](../uml/finance-package-diagram.puml),
+[`uml/finance-layers-diagram.puml`](../uml/finance-layers-diagram.puml) y
+[`uml/finance-domain-model-diagram.puml`](../uml/finance-domain-model-diagram.puml).
 
 Los DTOs HTTP pueden tener una forma distinta de los comandos de dominio. Los
 assemblers de `interfaces` realizan esa traducción.
@@ -776,9 +842,13 @@ negocio.
 - Definir el formato de errores HTTP común de Vankoo.
 - Definir la política de retención y el dead-letter de Kafka.
 - Definir la política de retención del payload crudo en el inbox de webhooks.
-- **Diseñar el contrato del agregado `Wallet`/`Ledger`** que consumirá
-  `DepositSucceededEvent` y acreditará el saldo. Es el siguiente contrato, no un
-  pendiente indefinido.
+- **Revisar en la Tarjeta 4 si `DepositSummary` se justifica**, o si conviene
+  mover `DepositQueryService` fuera del dominio y quedarse en dos tipos.
+- **Diseñar el contrato del agregado `Wallet`/`Ledger`**, segundo agregado de
+  este mismo bounded context, que consumirá `DepositSucceededEvent` por el event
+  bus de Axon y acreditará el saldo. Es el siguiente contrato, no un pendiente
+  indefinido. Al definirlo hay que decidir si la acreditación se orquesta con una
+  saga o con un event handler que despache un comando.
 
 ## Criterios de aceptación del contrato
 

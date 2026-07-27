@@ -59,6 +59,15 @@ Adoptamos la siguiente arquitectura:
    - No se utilizará como mecanismo principal para distribuir eventos entre las
      instancias internas de Finance; esa responsabilidad corresponde a Axon
      Server.
+   - **Los agregados de Finance se comunican entre sí por el event bus de Axon,
+     no por Kafka.** `Wallet`/`Ledger` será un segundo agregado de este mismo
+     bounded context —saldo y recargas comparten invariante contable, y separarlos
+     obligaría a coordinar dos servicios para acreditar una recarga— así que
+     recibirá `DepositSucceededEvent` internamente.
+   - **Consecuencia asumida:** en la v1, Kafka queda provisionado sin consumidor.
+     Se publica desde el principio para fijar el contrato antes de que exista el
+     primer consumidor externo, no porque haya uno. La Tarjeta 8 puede posponerse
+     sin bloquear ningún flujo de producto.
 
 4. **Los eventos de dominio públicos también serán eventos de integración.**
    - Un hecho de negocio seleccionado para salir por Kafka podrá utilizar el

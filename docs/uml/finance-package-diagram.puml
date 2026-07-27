@@ -12,6 +12,7 @@ package vankoo-finance-service as vankoo_finance_service {
                 package valueobjects {}
                 package exceptions {}
             }
+            package services {}
         }
         package infrastructure {
             package eventstore {
@@ -61,10 +62,16 @@ aggregates ..> exceptions
 entities ..> valueobjects
 events ..> valueobjects
 
+services ..> commands
+services ..> queries
+services ..> aggregates
+
+commandservices ..|> services
 commandservices ..> aggregates
 commandservices ..> commands
 commandservices ..> outboundservices
 commandservices ..> axon
+queryservices ..|> services
 queryservices ..> queries
 queryservices ..> events
 queryservices ..> repositories

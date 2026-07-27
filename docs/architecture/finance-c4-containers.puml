@@ -23,7 +23,7 @@ Enterprise_Boundary(vankoo, "Plataforma Vankoo") {
     }
 
     Container(axon_server, "Axon Server", "Axon Server", "Event Store y router interno de comandos/eventos para las instancias de Finance.")
-    ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker de integración entre bounded contexts. Topic vankoo.finance.events.v1.")
+    ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker de integración hacia OTROS bounded contexts. Topic vankoo.finance.events.v1. Sin consumidor en la v1: se publica para fijar el contrato.")
 }
 
 Rel(mype, web_app, "Usa", "HTTPS")
