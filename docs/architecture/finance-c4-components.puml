@@ -21,7 +21,7 @@ Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 5") {
 
     ' ---------- interfaces ----------
     Component(deposit_api, "Deposit REST Controller", "interfaces.rest.controllers", "Recibe HTTP, valida el formato y delega en los command/query services.")
-    Component(webhook_api, "Provider Webhook Controller", "interfaces.webhooks", "Recibe el payload crudo y la firma del proveedor. No lleva reglas de negocio.")
+    Component(webhook_api, "Provider Webhook Controller", "interfaces.rest.webhooks", "Recibe el payload crudo y la firma del proveedor. No lleva reglas de negocio.")
     Component(assemblers, "DTO Assemblers", "interfaces.rest.transform", "Traduce resources HTTP a comandos y queries de aplicación.")
 
     ' ---------- application ----------
@@ -35,10 +35,10 @@ Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 5") {
     Component(domain_events, "Deposit Domain Events", "domain.model.events", "DepositInitiated, DepositSucceeded, DepositFailed y demás hechos de negocio, con @EventTag.")
 
     ' ---------- infrastructure ----------
-    Component(axon_config, "Axon Event-Sourcing Config", "infrastructure.axon", "Conecta el agregado con Axon Server y configura el routing por depositId.")
-    Component(event_processor, "Deposit Event Processor", "infrastructure.axon", "Consume el stream de Axon Server y distribuye eventos a la proyección y al publicador.")
+    Component(axon_config, "Axon Event-Sourcing Config", "infrastructure.eventstore.axon", "Conecta el agregado con Axon Server y configura el routing por depositId.")
+    Component(event_processor, "Deposit Event Processor", "infrastructure.eventstore.axon", "Consume el stream de Axon Server y distribuye eventos a la proyección y al publicador.")
     Component(read_projection, "Deposit Projection", "application.internal.queryservices", "@ProcessingGroup(deposit-read-model). @EventHandler que construye deposit_view de forma idempotente y reconstruible por replay.")
-    Component(ops_repository, "Ops Repositories", "infrastructure.repositories", "Acceso JPA al inbox de webhooks, idempotencia de comandos y referencias del proveedor.")
+    Component(ops_repository, "Ops Repositories", "infrastructure.persistence.jpa.repositories", "Acceso JPA al inbox de webhooks, idempotencia de comandos y referencias del proveedor.")
     Component(kafka_publisher, "Deposit Event Publisher", "application.internal.outboundservices", "@EventHandler que decide qué eventos son contratos públicos y los envía al canal Kafka.")
     Component(kafka_binding, "Kafka Channel Binding", "infrastructure.brokers.kafka", "Productor, serialización y declaración de canales. Sin lógica de selección de eventos.")
     Component(stripe_adapter, "Stripe Payment Provider", "infrastructure.providers.stripe", "Implementa PaymentProvider, verifica firmas y traduce Stripe a estados de Finance.")

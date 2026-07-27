@@ -14,8 +14,14 @@ package vankoo-finance-service as vankoo_finance_service {
             }
         }
         package infrastructure {
-            package axon {}
-            package repositories {}
+            package eventstore {
+                package axon {}
+            }
+            package persistence {
+                package jpa {
+                    package repositories {}
+                }
+            }
             package brokers {
                 package kafka {}
             }
@@ -32,11 +38,13 @@ package vankoo-finance-service as vankoo_finance_service {
         package interfaces {
             package rest {
                 package controllers {}
+                package webhooks {}
                 package resources {}
                 package transform {}
             }
-            package webhooks {}
-            package eventhandlers {}
+            package messaging {
+                package eventhandlers {}
+            }
         }
     }
 }

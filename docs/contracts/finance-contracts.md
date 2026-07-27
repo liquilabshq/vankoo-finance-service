@@ -578,13 +578,14 @@ canónicos de sus figuras 5-10 a 5-14:
 
 ```text
 com.liquilabs.vankoo.finance
-├── interfaces/
-│   ├── rest/
-│   │   ├── controllers/   # DepositController, AccountDepositsController
-│   │   ├── resources/     # resources HTTP de entrada/salida
-│   │   └── transform/     # DTO assemblers: resource -> command/query
-│   ├── webhooks/          # controller de webhooks del proveedor
-│   └── eventhandlers/     # eventos entrantes de OTROS bounded contexts (vacío en v1)
+├── interfaces/                    # eje de clasificación: el transporte
+│   ├── rest/                      # transporte HTTP
+│   │   ├── controllers/           # nuestra API: deposits, accounts
+│   │   ├── webhooks/              # callback del proveedor: HTTP, pero no es nuestra API
+│   │   ├── resources/             # resources HTTP de entrada/salida
+│   │   └── transform/             # DTO assemblers: resource -> command/query
+│   └── messaging/                 # transporte de mensajería
+│       └── eventhandlers/         # eventos entrantes de OTROS bounded contexts (vacío en v1)
 ├── application/
 │   └── internal/
 │       ├── commandservices/   # casos de uso de escritura
@@ -599,13 +600,33 @@ com.liquilabs.vankoo.finance
 │       ├── events/        # DepositInitiatedEvent, ...
 │       ├── valueobjects/  # DepositId, AccountId, Money, DepositStatus, ...
 │       └── exceptions/    # excepciones de negocio
-└── infrastructure/
-    ├── axon/              # configuración de Axon y del event store
-    ├── repositories/      # acceso JPA al read model y a las tablas operativas
-    ├── brokers/kafka/     # productor y binding de canales Kafka
-    ├── providers/stripe/  # adaptador StripePaymentProvider
-    └── configuration/     # configuración técnica transversal
+└── infrastructure/                # eje de clasificación: rol, luego tecnología
+    ├── eventstore/axon/           # conexión, serializer, token store, event processors
+    ├── persistence/jpa/
+    │   └── repositories/          # read model y tablas operativas
+    ├── brokers/kafka/             # productor y binding de canales
+    ├── providers/stripe/          # adaptador StripePaymentProvider
+    └── configuration/             # configuración técnica transversal
 ```
+
+Las dos capas de adaptadores usan un **eje de clasificación explícito**, tomado
+del patrón de la guía:
+
+- **`interfaces` clasifica por transporte.** `rest` es HTTP y `messaging` es
+  broker, hermanos entre sí, como `interfaces.rest` e `interfaces.events` en la
+  guía. Los webhooks van **dentro de `rest`** porque comparten transporte —
+  necesitan un `@RestController`, un endpoint y un status code — pero en
+  subpaquete propio, porque no son nuestra API: retienen payload crudo, verifican
+  firma, no usan nuestros resources y responden sin esperar al comando.
+- **`infrastructure` clasifica por rol, luego por tecnología**, igual que la guía:
+  `brokers/rabbitmq`, `repositories/jdbc`, `services/http`. De ahí
+  `eventstore/axon`, `persistence/jpa`, `brokers/kafka`, `providers/stripe`. No
+  hay ningún paquete con nombre de tecnología en el primer nivel.
+
+> `persistence/jpa` se llama así, y no `repositories/jpa`, porque cuando aparezca
+> la `@Entity` del read model no será ni un repositorio ni dominio, y necesitará
+> un hermano de `repositories` bajo la misma tecnología. Hoy no existe todavía y
+> el paquete no se crea vacío.
 
 Sobre `domain/model/entities/`: el paquete existe y **no está prohibido usarlo**.
 En DDD una entidad es un objeto **con identidad propia** que no encaja como value
@@ -624,14 +645,15 @@ Equivalencias y reglas de dependencia:
 
   | Rol | Escucha | Paquete | Ejemplo de la guía |
   |---|---|---|---|
-  | Handler de integración | eventos de **otros** BC, vía Kafka | `interfaces/eventhandlers` | `trackingms.interfaces.events.CargoRoutedEventHandler` |
+  | Handler de integración | eventos de **otros** BC, vía Kafka | `interfaces/messaging/eventhandlers` | `trackingms.interfaces.events.CargoRoutedEventHandler` |
   | **Proyección** + query handlers | eventos **propios** | `application/internal/queryservices` | Fig. 6-7: el *Event Subscriber* está en el mismo recuadro que *Query Handler* y *Query Model* |
   | Publicador de integración | eventos **propios** | `application/internal/outboundservices` | `bookingms.application.internal.outboundservices.CargoEventPublisherService` |
 
   La infraestructura solo contiene la superficie de contacto con la tecnología:
-  el repositorio JPA (`CargoRepository` → `infrastructure/repositories`) y el
-  binding de canales del broker (`CargoEventSource` →
-  `infrastructure/brokers/rabbitmq`). Los handlers viven en `application`.
+  el repositorio JPA (`CargoRepository` → `infrastructure/repositories` en la
+  guía, `infrastructure/persistence/jpa/repositories` en Finance) y el binding de
+  canales del broker (`CargoEventSource` → `infrastructure/brokers/rabbitmq`).
+  Los handlers viven en `application`.
 
 - **La proyección y los query handlers van juntos.** La guía llama *Query Model*
   al conjunto, y el capítulo 6 lo dibuja como una sola unidad. Coincide además
@@ -681,7 +703,7 @@ public class Cargo {
 En Finance, `domain/model/aggregates/Deposit` **no lleva ninguna anotación de
 JPA** y no tiene identificador técnico autogenerado: su identidad es el
 `DepositId`, y su estado se reconstruye por replay. La única `@Entity` del
-servicio es la fila del read model, que vive en `infrastructure/repositories`.
+servicio será la fila del read model, bajo `infrastructure/persistence/jpa`.
 
 Consecuencia directa del event sourcing: no hay `deposit_repository.save(deposit)`
 en ninguna parte.
