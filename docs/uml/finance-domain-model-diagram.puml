@@ -2,7 +2,7 @@
 
 left to right direction
 
-title Vankoo Finance: Deposit Domain Model Diagram
+title Vankoo Finance: Domain Model Diagram
 
 skinparam class {
     BackgroundColor<<Aggregate Root>> #FFFFFF/B3E5FC
@@ -48,6 +48,13 @@ package "Finance Context" {
             + on(event : DepositFailedEvent) : void
             - assertNotTerminal() : void
             - assertProviderReferenceMatches(reference : ProviderDepositId) : void
+        }
+
+        class "Wallet" <<(A, #27D3F5) Aggregate Root>> {
+            .. contract not designed yet ..
+            Holds the investor balance.
+            Consumes DepositSucceededEvent
+            over the internal Axon event bus.
         }
 
     }
@@ -275,6 +282,10 @@ package "Finance Context" {
 ' Aggregate composition
 Deposit "1" *-- "1" Money : holds >
 
+' Second aggregate of this bounded context, still undesigned
+Wallet --> AccountId : identified by >
+Wallet ..> DepositSucceededEvent : consumes >
+
 ' Value object associations
 Deposit --> DepositId : identified by >
 Deposit --> AccountId : credits >
@@ -326,9 +337,10 @@ legend bottom
   <b>No child entities in the v1.</b> Every attribute is a value object.
   domain/model/entities exists and is available when one appears.
 
-  <b>Deposit is the only aggregate in the v1.</b> Wallet/Ledger will be a second aggregate
-  in this same bounded context and will appear in this diagram. It will consume
-  DepositSucceededEvent through the internal Axon event bus, not through Kafka.
+  <b>Wallet is shown without members on purpose.</b> It is the second aggregate of this
+  bounded context and its contract is not designed yet, so inventing fields here would
+  read as decided. Only what is already agreed is drawn: it owns AccountId and consumes
+  DepositSucceededEvent over the internal Axon event bus, not over Kafka.
 
   <b>Only the service interfaces live in the domain layer.</b> The implementations live in
   application/internal/{commandservices, queryservices}. Queries are resolved against
