@@ -377,6 +377,80 @@ El puerto vive en `application` y utiliza modelos propios de Finance:
 El puerto no expone tipos de Stripe. La implementación Stripe vive en
 `infrastructure` y traduce los errores del SDK a errores propios de aplicación.
 
+### Errores del puerto
+
+La jerarquía es `sealed` y vive junto al puerto, en `application`. El adaptador
+traduce a estos tipos cualquier error del SDK, de modo que ni `application` ni
+`domain` ven jamás una excepción de Stripe:
+
+| Error | ¿Reintentable? | Situación |
+|---|---|---|
+| `PaymentProviderTimeoutException` | Sí | El proveedor no respondió dentro del timeout. |
+| `PaymentProviderUnavailableException` | Sí | Proveedor caído o error de servidor. |
+| `PaymentProviderRejectedException` | No | Petición inválida, credenciales o regla del proveedor. |
+| `InvalidWebhookSignatureException` | No | La firma no valida contra el secreto. |
+
+Un cobro rechazado **no** es una excepción: es un desenlace de negocio y viaja
+como `FAILED` dentro de `ProviderDepositStatus`. La distinción importa porque un
+rechazo debe producir `DepositFailedEvent`, mientras que un error del puerto no
+produce ningún evento de dominio.
+
+### Estrategia de timeout y retry
+
+El puerto no implementa timeout ni retry: eso pertenece al adaptador concreto
+(Tarjeta 6), que es quien conoce el transporte. Lo que el puerto sí garantiza es
+**señalar** qué fallos son transitorios, mediante la interfaz marcadora
+`RetryablePaymentProviderException`. Quien orquesta el caso de uso decide si
+reintenta, con qué backoff y cuántas veces, sin inspeccionar mensajes de error
+por texto ni acoplarse a tipos concretos.
+
+Regla asociada: **un reintento debe conservar la misma `IdempotencyKey`.** Un
+timeout no prueba que la operación no se haya ejecutado del otro lado, así que
+reintentar con una clave nueva podría duplicar el cobro.
+
+Valores iniciales, a confirmar en la Tarjeta 6 contra la latencia real de Stripe:
+
+| Parámetro | Valor inicial |
+|---|---|
+| Timeout de conexión | 5 s |
+| Timeout de lectura | 10 s |
+| Intentos máximos | 3 (1 original + 2 reintentos) |
+| Backoff | exponencial: 200 ms, 400 ms, con jitter aleatorio |
+
+Qué se puede reintentar:
+
+- `getDeposit` siempre: es una lectura idempotente por naturaleza y es además
+  el camino de reconciliación cuando un webhook se pierde.
+- `createDeposit` solo conservando la misma `IdempotencyKey`.
+- `verifyWebhook` nunca: no sale a la red, y sus dos fallos posibles —firma
+  inválida o payload corrupto— son definitivos.
+
+Agotados los intentos, el error se propaga: el puerto no traga fallos en
+silencio. Quien orquesta decide si aparca la operación o la marca para revisión.
+
+### Idempotencia en `createDeposit`
+
+`CreateProviderDepositRequest.idempotencyKey` es obligatorio. La implementación
+Stripe (Tarjeta 6) debe mapearlo al header `Idempotency-Key` de la API de
+Stripe.
+
+Es una barrera distinta de la de `finance_ops.deposit_command_idempotency`: esa
+evita que el **cliente** cree dos recargas; esta evita que **Finance** cree dos
+recursos de cobro en el proveedor al reintentar.
+
+### Representación del dinero en el puerto
+
+El puerto usa `amountMinor` + `currency` aplanados, no un value object `Money`,
+porque `Money` es del dominio y todavía no existe. Es la misma representación
+plana que el contrato ya fija para el JSON de eventos y para Kafka, así que no
+introduce un concepto nuevo. Al llegar `Money`, el puerto puede adoptarlo sin
+cambiar su semántica.
+
+El puerto valida solo la **forma** ISO 4217 (tres letras). Que la moneda
+pertenezca al catálogo soportado es una invariante de negocio y la comprueba el
+agregado antes de que se invoque el puerto: repetirla aquí duplicaría una regla
+que no pertenece a esta capa.
+
 ---
 
 ## Webhooks: inbox, deduplicación y reintentos
@@ -873,6 +947,18 @@ negocio.
 
 ## Decisiones pendientes
 
+- **Tipos provisionales del puerto `PaymentProvider` (Tarjeta 5, pendiente de
+  revisión de Salim).** `ProviderDepositId`, `ProviderEventId`,
+  `IdempotencyKey` y el enum `NormalizedDepositStatus` se definieron en
+  `application/internal/outboundservices/paymentprovider` porque
+  `domain/model/valueobjects` todavía no existe. Al implementar el agregado
+  (Tarjeta 3) hay que decidir si se reubican en `domain` —los comandos
+  `RegisterDepositProviderReferenceCommand` y `ApplyProviderDepositUpdateCommand`
+  también los referencian— o si se quedan como tipos propios del puerto con un
+  mapeo explícito en la frontera. Mantenerlos separados permite que la taxonomía
+  del proveedor evolucione sin tocar el dominio; fundirlos elimina el mapeo.
+  Hoy nadie fuera de `outboundservices` los consume, así que el refactor es
+  barato en cualquiera de las dos direcciones.
 - Confirmar con Anjali la taxonomía de estados que cada proveedor puede normalizar.
 - **Diseño de `Wallet` con dos monedas:** un monedero por moneda o uno con un
   saldo por moneda, y si una recarga en USD puede financiar una factura en PEN.
