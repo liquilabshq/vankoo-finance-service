@@ -1,0 +1,179 @@
+@startuml finance-application-services-class-diagram
+
+left to right direction
+
+title Vankoo Finance: Application Services Command/Query Delegation
+
+skinparam shadowing false
+skinparam class {
+    BackgroundColor<<Command>> #FFFFFF/D1C4E9
+    BackgroundColor<<Query>> #FFFFFF/B2DFDB
+    BackgroundColor<<Query Result>> #FFFFFF/E1BEE7
+    BackgroundColor<<Domain Service>> #FFFFFF/FFCCBC
+    BackgroundColor<<Service>> #FFFFFF/FFE0B2
+    BackgroundColor<<Aggregate Root>> #FFFFFF/B3E5FC
+    BackgroundColor<<Outbound Service>> #FFFFFF/CFD8DC
+    BackgroundColor<<Repository>> #FFFFFF/ECEFF1
+    BorderColor #212121
+    ArrowColor #212121
+    FontSize 14
+}
+skinparam interface {
+    BackgroundColor #FFFFFF/FFCCBC
+    BorderColor #212121
+    ArrowColor #212121
+    FontSize 14
+}
+
+package "domain.model.commands" {
+    class "InitiateDepositCommand" <<(C, #9575CD) Command>> {
+    }
+    class "RegisterDepositProviderReferenceCommand" <<(C, #9575CD) Command>> {
+    }
+    class "ApplyProviderDepositUpdateCommand" <<(C, #9575CD) Command>> {
+    }
+}
+
+package "domain.model.queries" {
+    class "GetDepositByIdQuery" <<(Q, #4DB6AC) Query>> {
+    }
+    class "ListDepositsByAccountQuery" <<(Q, #4DB6AC) Query>> {
+    }
+    class "DepositSummary" <<(R, #BA68C8) Query Result>> {
+    }
+}
+
+package "domain.services" {
+    interface "DepositCommandService" <<(S, #FF8A65) Domain Service>> {
+        + handle(command : InitiateDepositCommand) : DepositId
+        + handle(command : RegisterDepositProviderReferenceCommand) : void
+        + handle(command : ApplyProviderDepositUpdateCommand) : void
+    }
+
+    interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
+        + handle(query : GetDepositByIdQuery) : DepositSummary
+        + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
+    }
+}
+
+package "domain.model.aggregates" {
+    class "Deposit" <<(A, #27D3F5) Aggregate Root>> {
+        + {static} handle(command : InitiateDepositCommand, events : EventAppender) : String
+        + handle(command : ApplyProviderDepositUpdateCommand, events : EventAppender) : void
+    }
+}
+
+package "application.internal.commandservices" {
+    class "DepositCommandServiceImpl" <<(V, #FFA726) Service>> {
+        - commandGateway : CommandGateway
+        - paymentProvider : PaymentProvider
+        - idempotencyRepository : DepositIdempotencyRepository
+        + handle(command : InitiateDepositCommand) : DepositId
+        + handle(command : ApplyProviderDepositUpdateCommand) : void
+    }
+
+    class "WebhookInboxService" <<(V, #FFA726) Service>> {
+        - inboxRepository : WebhookInboxRepository
+        - paymentProvider : PaymentProvider
+        + accept(update : VerifiedProviderDepositUpdate) : void
+        + resolveAndApply() : void
+    }
+}
+
+package "application.internal.queryservices" {
+    class "DepositQueryServiceImpl" <<(V, #FFA726) Service>> {
+        - depositViewRepository : DepositViewRepository
+        + handle(query : GetDepositByIdQuery) : DepositSummary
+        + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
+    }
+
+    class "DepositProjection" <<(V, #FFA726) Service>> {
+        - depositViewRepository : DepositViewRepository
+        + on(event : DepositInitiatedEvent) : void
+        + on(event : DepositSucceededEvent) : void
+    }
+}
+
+package "application.internal.outboundservices" {
+    interface "PaymentProvider" <<(O, #78909C) Outbound Service>> {
+        + createDeposit(request : CreateProviderDepositRequest) : ProviderDepositCreated
+        + getDeposit(reference : ProviderDepositReference) : ProviderDepositStatus
+        + verifyWebhook(rawPayload : String, signature : String) : VerifiedProviderDepositUpdate
+    }
+
+    class "DepositEventPublisher" <<(V, #FFA726) Service>> {
+        + on(event : DepositSucceededEvent) : void
+    }
+}
+
+package "infrastructure.persistence.jpa.repositories" {
+    interface "DepositViewRepository" <<(R, #90A4AE) Repository>> {
+        + findByDepositId(depositId : UUID) : DepositViewEntity
+        + findByAccountId(accountId : UUID, page : Pageable) : List<DepositViewEntity>
+    }
+
+    interface "WebhookInboxRepository" <<(R, #90A4AE) Repository>> {
+        + insertIfAbsent(provider : String, providerEventId : String) : boolean
+        + resolveDepositId(provider : String, providerDepositId : String) : UUID
+        + markApplied(id : UUID) : void
+        + park(id : UUID, nextAttemptAt : Instant) : void
+    }
+
+    interface "DepositIdempotencyRepository" <<(R, #90A4AE) Repository>> {
+        + findDepositId(accountId : UUID, idempotencyKey : String) : UUID
+    }
+}
+
+' ---------- command delegation ----------
+DepositCommandServiceImpl ..|> DepositCommandService : implements >
+DepositCommandServiceImpl ..> InitiateDepositCommand : handles >
+DepositCommandServiceImpl ..> ApplyProviderDepositUpdateCommand : handles >
+DepositCommandServiceImpl ..> Deposit : dispatches to >
+DepositCommandServiceImpl ..> PaymentProvider : creates external charge >
+DepositCommandServiceImpl ..> DepositIdempotencyRepository : checks Idempotency-Key >
+
+WebhookInboxService ..> PaymentProvider : verifies signature >
+WebhookInboxService ..> WebhookInboxRepository : deduplicates and parks >
+WebhookInboxService ..> ApplyProviderDepositUpdateCommand : builds >
+WebhookInboxService ..> DepositCommandService : delegates >
+
+Deposit ..> RegisterDepositProviderReferenceCommand : handles >
+
+' ---------- query delegation ----------
+DepositQueryServiceImpl ..|> DepositQueryService : implements >
+DepositQueryServiceImpl ..> GetDepositByIdQuery : handles >
+DepositQueryServiceImpl ..> ListDepositsByAccountQuery : handles >
+DepositQueryServiceImpl ..> DepositViewRepository : reads >
+DepositQueryServiceImpl ..> DepositSummary : returns >
+
+DepositProjection ..> DepositViewRepository : writes >
+
+note bottom of DepositCommandServiceImpl
+  The service coordinates, it does not decide.
+  Invariants live in the aggregate: the service
+  never inspects the deposit state to choose
+  what to do next.
+end note
+
+note bottom of DepositQueryServiceImpl
+  Queries read the projection. They never load
+  the aggregate, so they cost one SQL statement
+  instead of a full replay.
+end note
+
+legend bottom
+  <b>Both interfaces are declared in domain.services and implemented here.</b>
+  The domain states what the use cases are; the application layer wires them to
+  Axon, to the provider and to the repositories.
+
+  <b>Following the guide, application depends on infrastructure directly</b> for
+  repositories, as CargoBookingCommandService imports CargoRepository. The one
+  deliberate inversion is PaymentProvider: declared in outboundservices and
+  implemented in infrastructure.providers.stripe, so the use case can be tested
+  against a fake without Stripe.
+
+  DepositProjection and DepositEventPublisher are not called by anyone here: the
+  Axon event processor invokes them from the event stream.
+endlegend
+
+@enduml

@@ -147,7 +147,20 @@ Reglas:
 - `amountMinor` es una cantidad entera en unidades menores y debe ser mayor que cero;
 - no se utilizarán `float` ni `double` para dinero;
 - `currency` es ISO 4217 en mayúsculas y debe pertenecer al catálogo soportado;
-- una recarga no cambia de moneda después de creada.
+- una recarga no cambia de moneda después de creada;
+- **no se permiten operaciones aritméticas entre `Money` de distinta moneda.** Sumar
+  PEN con USD debe fallar en tiempo de ejecución, no convertir en silencio.
+
+**Catálogo soportado en la v1: `PEN` y `USD`.** Se modela como enum en el dominio,
+de forma que la invariante 2 se comprueba en compilación y no puede colarse una
+moneda sin soporte operativo.
+
+> Soportar dos monedas desde la v1 arrastra dos preguntas al diseño de `Wallet`,
+> que quedan abiertas: si el inversionista tiene **un monedero por moneda o uno
+> con un saldo por moneda**, y si una recarga en USD puede financiar una factura
+> en PEN —lo que introduciría tipo de cambio, que es un tema propio con su
+> política de redondeo y su fuente de tasas. Ninguna bloquea la v1 de `Deposit`,
+> pero conviene no descubrirlas al empezar `Wallet`.
 
 **En el JSON de eventos y contratos externos, `Money` se serializa aplanado**
 como `amountMinor` + `currency`. Se documenta aquí de forma explícita para que
@@ -225,7 +238,7 @@ del agregado en el Event Store.
 
 | Evento | Cuándo se produce | Alcance inicial |
 |---|---|---|
-| `DepositInitiatedEvent` | Se acepta la creación de la recarga. | Público |
+| `DepositInitiatedEvent` | Se acepta la creación de la recarga. | Interno |
 | `DepositProviderReferenceRegisteredEvent` | Se registra la referencia del proveedor. | Interno |
 | `DepositActionRequiredEvent` | El proveedor requiere una acción del usuario. | Público potencial |
 | `DepositProcessingStartedEvent` | El proveedor informa que la recarga entró en procesamiento. | Público potencial |
@@ -247,9 +260,17 @@ infraestructura.
   "accountId": "8b8c7f7e-f91d-4c13-9f18-1f0e9c8b3d21",
   "amountMinor": 12500,
   "currency": "PEN",
-  "provider": "STRIPE"
+  "provider": "STRIPE",
+  "idempotencyKey": "opaque-client-key",
+  "description": "Recarga de saldo"
 }
 ```
+
+`idempotencyKey` y `description` se registran aquí y **solo aquí**. La clave da
+trazabilidad desde la recarga hasta la petición original del cliente, útil cuando
+alguien reclama un cobro duplicado; la descripción es texto del inversionista que
+se muestra en su historial. Ninguno de los dos participa en decisiones del
+agregado: son datos que el evento conserva, no estado que gobierne transiciones.
 
 `DepositProviderReferenceRegisteredEvent` añade los datos técnicos necesarios
 para continuar la integración, y por eso **no se publica**:
@@ -395,9 +416,14 @@ Reglas:
 - El `providerEventId` es obligatorio.
 - La respuesta HTTP al proveedor no espera al procesamiento del comando.
 
-**Doble barrera:** el inbox evita el trabajo repetido; la invariante 7 garantiza
-la corrección aunque un duplicado se cuele (un `SUCCEEDED` sobre una recarga ya
-`SUCCEEDED` no emite evento).
+**Triple barrera:** la restricción única del inbox evita el trabajo repetido, el
+camino `PARKED` + reintento resuelve el orden de llegada, y la invariante 7
+garantiza la corrección aunque un duplicado se cuele (un `SUCCEEDED` sobre una
+recarga ya `SUCCEEDED` no emite evento).
+
+El flujo completo, con sus ramas de firma inválida, duplicado, llegada
+anticipada y estado terminal, está en
+[`uml/finance-webhook-sequence-diagram.puml`](../uml/finance-webhook-sequence-diagram.puml).
 
 ### Idempotencia de comandos de cliente
 
@@ -432,17 +458,29 @@ finance_ops.deposit_provider_reference
 
 ### Selección
 
-En la primera versión se publican como eventos de integración:
+Se publican **solo los desenlaces**, que son los hechos que otro bounded context
+puede necesitar:
 
-- `DepositInitiatedEvent`;
-- `DepositActionRequiredEvent`, si otro bounded context necesita conocerlo;
-- `DepositProcessingStartedEvent`, si otro bounded context necesita conocerlo;
 - `DepositSucceededEvent`;
 - `DepositFailedEvent`;
 - `DepositCancelledEvent`.
 
-`DepositProviderReferenceRegisteredEvent` es interno: expone una referencia del
-proveedor y no representa un hecho que otros bounded contexts deban consumir.
+El resto son internos, cada uno por su motivo:
+
+| Evento | Por qué no se publica |
+|---|---|
+| `DepositInitiatedEvent` | Que una recarga *empiece* no es un hecho útil fuera: el monedero solo reacciona cuando termina bien, y vive dentro de Finance. Además lleva `idempotencyKey` y `description`, que son plomería nuestra y texto libre del inversionista: nada que deba cruzar la frontera. |
+| `DepositProviderReferenceRegisteredEvent` | Expone una referencia del proveedor. |
+| `DepositActionRequiredEvent` | Describe un paso intermedio del flujo de pago, no un hecho de negocio cerrado. |
+| `DepositProcessingStartedEvent` | Igual: estado transitorio del proveedor. |
+
+> Esta separación se apoya en la regla del ADR-0001 de que **el evento de dominio
+> y el de integración comparten el mismo payload**. Como no hay mapper que recorte
+> campos, la única forma de no exponer un dato es no publicar el evento que lo
+> lleva. Es una restricción real de esa regla, y `DepositInitiatedEvent` es el
+> primer caso donde se nota: si algún día necesitamos publicar un hecho cuyo
+> evento de dominio contiene algo privado, habrá que revisar la regla en vez de
+> forzar el contrato.
 
 > **Kafka en la v1 no tiene consumidor todavía.** El consumidor natural de
 > `DepositSucceededEvent` es `Wallet`, y `Wallet` vive **dentro** de Finance, así
@@ -538,6 +576,7 @@ La primera proyección es `finance_read_model.deposit_view`:
 | `currency` | Moneda ISO 4217. |
 | `provider` | Proveedor normalizado. |
 | `provider_deposit_id` | Referencia externa, si existe. |
+| `description` | Texto del inversionista, para su historial. |
 | `status` | Estado actual de Finance. |
 | `action_url` | URL de acción, si aplica y sigue vigente. |
 | `failure_reason` | Razón normalizada, si la recarga falló. |
@@ -835,9 +874,10 @@ negocio.
 ## Decisiones pendientes
 
 - Confirmar con Anjali la taxonomía de estados que cada proveedor puede normalizar.
-- Confirmar si `DepositActionRequiredEvent` y `DepositProcessingStartedEvent`
-  deben publicarse desde la primera versión.
-- Confirmar el catálogo de monedas soportadas.
+- **Diseño de `Wallet` con dos monedas:** un monedero por moneda o uno con un
+  saldo por moneda, y si una recarga en USD puede financiar una factura en PEN.
+- Confirmar con Anjali que Stripe puede liquidar tanto `PEN` como `USD` para la
+  cuenta de Vankoo, y con qué método de pago en cada caso.
 - Definir los límites de tamaño para descripción e identificadores externos.
 - Definir el formato de errores HTTP común de Vankoo.
 - Definir la política de retención y el dead-letter de Kafka.

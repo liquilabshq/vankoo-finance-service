@@ -101,6 +101,10 @@ Domain Event
    +--> Kafka, si el evento es público para otro bounded context
 ```
 
+Este flujo, con los nombres reales de Finance y los dos suscriptores del mismo
+stream, está en
+[`uml/finance-cqrs-event-sourcing-diagram.puml`](../uml/finance-cqrs-event-sourcing-diagram.puml).
+
 ## Reglas para los eventos publicados en Kafka
 
 Un evento de dominio podrá publicarse también en Kafka únicamente si:

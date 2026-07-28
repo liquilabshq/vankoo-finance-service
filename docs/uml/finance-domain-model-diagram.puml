@@ -83,6 +83,7 @@ package "Finance Context" {
 
         class "Currency" <<(V, #FFD700) Value Object>> {
             PEN
+            USD
             --
             + isSupported() : boolean
             + getIsoCode() : String
@@ -187,6 +188,7 @@ package "Finance Context" {
             + providerDepositId : ProviderDepositId
             + status : DepositStatus
             + failureReason : FailureReason
+            + description : String
             + actionUrl : String
             + createdAt : Instant
             + updatedAt : Instant
@@ -201,6 +203,8 @@ package "Finance Context" {
             + amountMinor : long
             + currency : String
             + provider : Provider
+            + idempotencyKey : String
+            + description : String
         }
 
         class "DepositProviderReferenceRegisteredEvent" <<(D, #EF5350) Domain Event>> {
