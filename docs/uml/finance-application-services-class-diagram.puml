@@ -58,8 +58,8 @@ package "domain.services" {
 
 package "domain.model.aggregates" {
     class "Deposit" <<(A, #27D3F5) Aggregate Root>> {
-        + {static} handle(command : InitiateDepositCommand, events : EventAppender) : String
-        + handle(command : ApplyProviderDepositUpdateCommand, events : EventAppender) : void
+        + Deposit(command : InitiateDepositCommand)
+        + handle(command : ApplyProviderDepositUpdateCommand) : void
     }
 }
 

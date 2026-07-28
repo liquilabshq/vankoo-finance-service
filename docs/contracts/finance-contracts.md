@@ -5,7 +5,7 @@
 - **Fecha:** 2026-07-26
 - **Bounded Context:** Finance
 - **Servicio:** `vankoo-finance-service`
-- **ADR relacionados:** [ADR-0001](../adr/0001-axon-server-event-store-postgresql-read-model.md) · [ADR-0002](../adr/0002-axon-5-programming-model.md)
+- **ADR relacionados:** [ADR-0001](../adr/0001-axon-server-event-store-postgresql-read-model.md) · [ADR-0002](../adr/0002-axon-version-and-server-licensing.md)
 
 ## Propósito
 
@@ -24,7 +24,7 @@ El contrato se divide en:
 El dominio no dependerá de Kafka, PostgreSQL, Redis, HTTP ni del SDK de Stripe.
 Esos detalles se conectarán desde `application`, `infrastructure` e `interfaces`.
 La dependencia de Axon Framework en el dominio se limita a anotaciones de
-modelado, según lo justificado en el [ADR-0002](../adr/0002-axon-5-programming-model.md).
+modelado, según lo justificado en el [ADR-0002](../adr/0002-axon-version-and-server-licensing.md).
 
 ---
 
@@ -861,7 +861,7 @@ preserva el orden causal de cada recarga.
 
 No se documentan como eventos adicionales:
 
-- mensajes, tags, `EventCriteria` y metadata interna de Axon;
+- `CommandMessage`, `EventMessage`, sequence number y metadata interna de Axon;
 - headers, particiones, offsets y envelopes de Kafka;
 - payload crudo, firma y tipos del SDK de Stripe;
 - entidades JPA, tablas del Read Model y tablas de `finance_ops`.

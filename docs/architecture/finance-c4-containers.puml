@@ -18,11 +18,11 @@ Enterprise_Boundary(vankoo, "Plataforma Vankoo") {
     Container(api_gateway, "Vankoo API Gateway", "Spring Cloud Gateway", "Autentica, aplica políticas de entrada y redirige las solicitudes al microservicio correspondiente. También enruta los webhooks entrantes del proveedor.")
 
     System_Boundary(finance_system, "Finance Bounded Context") {
-        Container(finance_service, "Finance Service", "Spring Boot + Axon Framework 5", "Único microservicio desplegable. Recibe comandos y webhooks, ejecuta el agregado Deposit, proyecta eventos y publica eventos públicos.")
+        Container(finance_service, "Finance Service", "Spring Boot + Axon Framework 4", "Único microservicio desplegable. Recibe comandos y webhooks, ejecuta el agregado Deposit, proyecta eventos y publica eventos públicos.")
         ContainerDb(finance_db, "Finance Database", "PostgreSQL", "Dos schemas: finance_read_model (proyección deposit_view) y finance_ops (inbox de webhooks, idempotencia y resolución de referencias). Ninguno es la fuente de verdad.")
     }
 
-    Container(axon_server, "Axon Server", "Axon Server", "Event Store y router interno de comandos/eventos para las instancias de Finance.")
+    Container(axon_server, "Axon Server", "Axon Server (standalone)", "Event Store y router interno de comandos/eventos. Instancia única bajo el plan gratuito de AxonIQ: sin clustering.")
     ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker de integración hacia OTROS bounded contexts. Topic vankoo.finance.events.v1. Sin consumidor en la v1: se publica para fijar el contrato.")
 }
 

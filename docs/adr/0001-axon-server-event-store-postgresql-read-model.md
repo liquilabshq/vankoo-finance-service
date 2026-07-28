@@ -4,7 +4,7 @@
 - **Fecha:** 2026-07-25 (revisado 2026-07-26)
 - **Contexto:** `vankoo-finance-service` / bounded context Finance
 - **Decisores:** Salim y Anjali
-- **Complementado por:** [ADR-0002 — Axon Framework 5 y traducción del modelo de la guía](0002-axon-5-programming-model.md)
+- **Complementado por:** [ADR-0002 — Versión de Axon y licencia de Axon Server](0002-axon-version-and-server-licensing.md)
 
 ## Contexto
 
@@ -29,9 +29,13 @@ Adoptamos la siguiente arquitectura:
      instancias de `finance-service`.
    - Todas las instancias de Finance se conectarán al mismo contexto lógico de
      Axon Server, denominado `finance`.
-   - En producción se utilizará un cluster de Axon Server para evitar que una
-     única instancia sea un punto único de falla. En desarrollo podrá utilizarse
-     una instancia standalone.
+   - Se desplegará como **instancia única (standalone)**, tanto en desarrollo
+     como en el despliegue académico. **El clustering queda descartado**: los
+     términos de AxonIQ clasifican cualquier cluster de más de un nodo fuera del
+     uso de desarrollo del plan gratuito. Detalle en el
+     [ADR-0002](0002-axon-version-and-server-licensing.md).
+   - Consecuencia asumida: Axon Server es un **punto único de falla**. Es
+     aceptable para un proyecto académico; dejaría de serlo en operación real.
 
 2. **PostgreSQL será el Read Model durable de Finance.**
    - Las proyecciones consumirán eventos de Axon Server y mantendrán tablas
@@ -132,8 +136,11 @@ del catálogo de contratos de Finance.
 ## Consecuencias y riesgos
 
 - Axon Server se convierte en una dependencia crítica de ejecución y operación.
-- El cluster de Axon Server requiere configuración de persistencia, backups,
-  control de acceso y TLS para producción.
+- Al ser instancia única, Axon Server es un punto único de falla y requiere
+  configuración de persistencia y backups propios, separados de los de PostgreSQL.
+- El plan gratuito de AxonIQ cubre uso de desarrollo y evaluación, no producción.
+  Si Vankoo dejara de ser académico habría que contratar plan (desde $150/mes) o
+  migrar el event store a PostgreSQL con `JpaEventStorageEngine`.
 - Al reutilizar eventos de dominio como contratos Kafka, los cambios del evento
   deben considerar simultáneamente la rehidratación de agregados y la
   compatibilidad con consumidores externos.
@@ -145,9 +152,14 @@ del catálogo de contratos de Finance.
 
 ### PostgreSQL como Event Store
 
-Se descarta como opción principal porque el despliegue objetivo utiliza Axon
-Server para el almacenamiento y routing distribuido. PostgreSQL seguirá siendo
-el almacenamiento del Read Model.
+Se descarta como opción principal porque el capítulo 6 de la guía desarrolla
+Axon Server y el objetivo del proyecto es aprender siguiendo ese material.
+PostgreSQL seguirá siendo el almacenamiento del Read Model.
+
+Queda registrada como **salida** si el proyecto dejara de ser académico: la
+figura 6-8 de la guía contempla *SQL Database(s)* como Event Store, y Axon
+Framework lo soporta vía `JpaEventStorageEngine`, sin techo de licencia. Ver
+[ADR-0002](0002-axon-version-and-server-licensing.md).
 
 ### Kafka para la distribución interna de Finance
 
@@ -175,19 +187,19 @@ consultas.
 - ~~Estrategia de snapshots~~ → sin snapshots en la v1; decisión y motivo en el
   catálogo de contratos.
 - ~~Versión mayor de Axon Framework~~ → fijada en el
-  [ADR-0002](0002-axon-5-programming-model.md).
+  [ADR-0002](0002-axon-version-and-server-licensing.md).
 - Convención de nombres, esquema y versionado de eventos.
 - Configuración de proyecciones, token store, reintentos y dead-letter queue.
-- Configuración del cluster de Axon Server, backups, TLS y control de acceso.
+- Configuración de backups, TLS y control de acceso de la instancia de Axon Server.
 - Política de retención del payload crudo en el inbox de webhooks.
 - Contrato del agregado `Wallet`/`Ledger` que consumirá `DepositSucceededEvent`
   y acreditará el saldo del inversionista.
 
 ## Referencias
 
-Todas las referencias de Axon Framework apuntan a la línea **5.x**, fijada en el
-[ADR-0002](0002-axon-5-programming-model.md).
+Todas las referencias de Axon Framework apuntan a la línea **4.x**, fijada en el
+[ADR-0002](0002-axon-version-and-server-licensing.md).
 
-- [Axon Framework 5: infraestructura de eventos](https://docs.axoniq.io/axon-framework-reference/5.1/events/infrastructure/)
-- [Axon Framework 5: command bus distribuido](https://docs.axoniq.io/axon-framework-reference/5.0/commands/infrastructure/)
+- [Axon Framework 4: infraestructura de eventos](https://docs.axoniq.io/axon-framework-reference/4.11/events/infrastructure/)
+- [Axon Framework 4: agregados](https://docs.axoniq.io/axon-framework-reference/4.10/axon-framework-commands/modeling/aggregate/)
 - [Axon Server: instalación y clustering](https://docs.axoniq.io/axon-server-reference/v2026.0/axon-server/installation/local-installation/)
