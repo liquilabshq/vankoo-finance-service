@@ -360,6 +360,11 @@ traducir sus estados a la taxonomía de Finance antes de enviar el comando:
 | Rechazado o con error definitivo | `FAILED` |
 | Cancelado o expirado | `CANCELLED` |
 
+Esta taxonomía está implementada como el enum `NormalizedDepositStatus`, en
+`application/internal/outboundservices/paymentprovider/model`. No incluye
+`PENDING` porque ese es el estado inicial que el agregado se da a sí mismo al
+aceptar la recarga, y nunca llega desde una observación externa.
+
 El dominio no recibirá un objeto `Stripe.Event`, `PaymentIntent` ni otro tipo
 del SDK. La verificación de firma y la retención temporal del payload crudo
 pertenecen a `infrastructure`.
@@ -959,7 +964,17 @@ negocio.
   del proveedor evolucione sin tocar el dominio; fundirlos elimina el mapeo.
   Hoy nadie fuera de `outboundservices` los consume, así que el refactor es
   barato en cualquiera de las dos direcciones.
-- Confirmar con Anjali la taxonomía de estados que cada proveedor puede normalizar.
+- ~~Confirmar con Anjali la taxonomía de estados que cada proveedor puede
+  normalizar~~ → **resuelto** en la Tarjeta 5: `NormalizedDepositStatus` define
+  `ACTION_REQUIRED`, `PROCESSING`, `SUCCEEDED`, `FAILED` y `CANCELLED`, que
+  coinciden con la tabla de mapeo de abajo. Excluye `PENDING` a propósito: es el
+  estado inicial que el agregado se da a sí mismo, nunca una observación externa.
+- **`failureReason` viaja como `String` libre** en `VerifiedProviderDepositUpdate`
+  y `ProviderDepositStatus`, donde este contrato define un enum de cinco valores.
+  Con `String`, el código crudo del proveedor puede filtrarse hacia dentro. Se
+  corrige en la Tarjeta 3, al crear `FailureReason` en `domain/model/valueobjects`
+  y montar el mapeo — hacerlo antes obligaría a crear el enum dentro del paquete
+  del puerto, que es justo la ubicación que quedó por decidir.
 - **Diseño de `Wallet` con dos monedas:** un monedero por moneda o uno con un
   saldo por moneda, y si una recarga en USD puede financiar una factura en PEN.
 - Confirmar con Anjali que Stripe puede liquidar tanto `PEN` como `USD` para la
