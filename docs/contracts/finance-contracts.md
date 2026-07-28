@@ -395,9 +395,14 @@ Reglas:
 - El `providerEventId` es obligatorio.
 - La respuesta HTTP al proveedor no espera al procesamiento del comando.
 
-**Doble barrera:** el inbox evita el trabajo repetido; la invariante 7 garantiza
-la corrección aunque un duplicado se cuele (un `SUCCEEDED` sobre una recarga ya
-`SUCCEEDED` no emite evento).
+**Triple barrera:** la restricción única del inbox evita el trabajo repetido, el
+camino `PARKED` + reintento resuelve el orden de llegada, y la invariante 7
+garantiza la corrección aunque un duplicado se cuele (un `SUCCEEDED` sobre una
+recarga ya `SUCCEEDED` no emite evento).
+
+El flujo completo, con sus ramas de firma inválida, duplicado, llegada
+anticipada y estado terminal, está en
+[`uml/finance-webhook-sequence-diagram.puml`](../uml/finance-webhook-sequence-diagram.puml).
 
 ### Idempotencia de comandos de cliente
 

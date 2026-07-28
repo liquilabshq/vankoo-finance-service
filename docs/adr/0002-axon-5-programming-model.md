@@ -89,6 +89,10 @@ intenta publicarlo, así que **son dos operaciones separadas**. De ahí vienen l
 requisitos de idempotencia, reintentos y dead-letter del catálogo de contratos:
 no son burocracia, son la consecuencia de haber desacoplado estos dos pasos.
 
+El flujo resultante, en sus dos variantes —creación sin replay y modificación con
+replay— está dibujado en
+[`uml/finance-event-sourcing-flow-diagram.puml`](../uml/finance-event-sourcing-flow-diagram.puml).
+
 ### Lo que no cambia
 
 Estos elementos de la guía siguen siendo válidos tal cual, y son la mayor parte

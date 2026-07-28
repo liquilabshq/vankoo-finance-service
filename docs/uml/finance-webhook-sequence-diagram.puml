@@ -1,0 +1,140 @@
+@startuml finance-webhook-sequence-diagram
+
+title Vankoo Finance: Provider Webhook Sequence Diagram
+
+skinparam shadowing false
+skinparam sequence {
+    ArrowColor #212121
+    LifeLineBorderColor #212121
+    ParticipantBorderColor #212121
+    ParticipantBackgroundColor #FFFFFF
+    ActorBorderColor #212121
+    ActorBackgroundColor #FFFFFF
+}
+
+actor "Stripe" as stripe
+participant "Webhook\nController" as ctrl <<interfaces.rest.webhooks>>
+participant "Stripe Payment\nProvider" as provider <<infrastructure.providers.stripe>>
+participant "Webhook Inbox\nService" as inbox <<application.internal.commandservices>>
+database "finance_ops" as ops
+participant "Deposit Command\nService" as cmd <<application.internal.commandservices>>
+participant "Deposit\nAggregate" as agg <<domain.model.aggregates>>
+database "Axon Server\nEvent Store" as store
+
+== Synchronous: verify, record, acknowledge ==
+
+stripe -> ctrl : POST /v1/payment-providers/stripe/webhooks\nraw payload + signature header
+activate ctrl
+
+ctrl -> provider : verifyWebhook(rawPayload, signature)
+activate provider
+
+alt signature invalid
+    provider --> ctrl : InvalidSignatureException
+    ctrl --> stripe : 400 Bad Request
+    note right of ctrl
+        Nothing is stored. An unverified payload
+        is not evidence of anything, so it must
+        not reach the inbox.
+    end note
+else signature valid
+    provider --> ctrl : VerifiedProviderDepositUpdate\n(providerEventId, providerDepositId, status)
+    deactivate provider
+
+    ctrl -> inbox : accept(update)
+    activate inbox
+    inbox -> ops : INSERT INTO provider_webhook_inbox\nUNIQUE(provider, provider_event_id)
+
+    alt already seen (unique violation)
+        ops --> inbox : conflict
+        inbox --> ctrl : duplicate, nothing to do
+        ctrl --> stripe : 200 OK
+        note right of inbox
+            <b>Deduplication barrier.</b>
+            No command is dispatched, so the
+            deposit cannot be counted twice.
+        end note
+    else new event
+        ops --> inbox : stored as RECEIVED
+        inbox --> ctrl : accepted
+        ctrl --> stripe : 200 OK
+        note right of ctrl
+            The acknowledgement does not wait for
+            the command. Stripe retries on slow
+            responses, which would create more
+            duplicates for no reason.
+        end note
+    end
+    deactivate ctrl
+end
+
+== Asynchronous: resolve and apply ==
+
+inbox -> ops : resolve depositId by\n(provider, provider_deposit_id)
+
+alt provider reference not registered yet
+    ops --> inbox : not found
+    inbox -> ops : status = PARKED\nnext_attempt_at = now + backoff
+    note right of inbox
+        <b>Race barrier.</b>
+        The webhook can arrive before our own
+        RegisterDepositProviderReferenceCommand
+        has been processed. It is parked and
+        retried, never rejected, and it never
+        creates a deposit.
+    end note
+
+    ...retry with exponential backoff...
+
+    inbox -> ops : resolve depositId (retry)
+    note right of inbox
+        On exhaustion the row stays PARKED,
+        an alert is raised, and a human decides.
+    end note
+
+else resolved
+    ops --> inbox : depositId
+
+    inbox -> cmd : ApplyProviderDepositUpdateCommand
+    activate cmd
+    cmd -> agg : routed by depositId
+    activate agg
+
+    agg -> store : load events for depositId
+    store --> agg : event history
+    agg -> agg : replay to current state
+
+    alt deposit already in a terminal state
+        agg --> cmd : no event produced
+        note right of agg
+            <b>Correctness barrier.</b>
+            Terminal states make a repeat harmless
+            even if a duplicate slipped past the inbox.
+        end note
+    else transition allowed
+        agg -> store : append DepositSucceededEvent
+        store --> agg : appended
+        agg --> cmd : accepted
+    end
+    deactivate agg
+
+    cmd --> inbox : done
+    deactivate cmd
+    inbox -> ops : status = APPLIED
+    deactivate inbox
+end
+
+legend bottom
+  <b>Three independent barriers protect against double counting.</b>
+  The inbox unique constraint avoids the work, the parked-retry path handles
+  arrival order, and the aggregate's terminal states guarantee correctness even
+  if the first two fail.
+
+  <b>The aggregate never sees Stripe.</b> Signature verification and the raw payload
+  stay in infrastructure; what reaches the domain is a normalized command.
+
+  <b>A webhook never creates a deposit.</b> An update for an unknown reference is
+  parked for review, not treated as a new one.
+endlegend
+
+@enduml

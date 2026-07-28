@@ -1,0 +1,97 @@
+@startuml finance-event-sourcing-flow-diagram
+
+title Vankoo Finance: Event Sourcing Flow Diagram
+
+skinparam shadowing false
+skinparam ArrowColor #212121
+skinparam rectangle {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+skinparam database {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+skinparam queue {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+skinparam actor {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+
+' =====================================================================
+' USE CASE 1 - Creation: no replay, the aggregate is born from a command
+' =====================================================================
+rectangle "Use case 1 — Initiate deposit (creation)" as uc1 #FAFAFA {
+    actor "Investor" as investor
+    rectangle "Deposit REST\nController" as api1
+    rectangle "Deposit Command\nService" as svc1
+    rectangle "New Deposit\nAggregate" as agg1
+    rectangle "DepositInitiatedEvent" as ev1 #FFF9C4
+}
+
+' =====================================================================
+' USE CASE 2 - Modification: retrieve, replay, decide, produce
+' =====================================================================
+rectangle "Use case 2 — Apply provider update (modification)" as uc2 #FAFAFA {
+    actor "Stripe" as stripe
+    rectangle "Webhook Inbox\nService" as inbox2
+    rectangle "Deposit Command\nService" as svc2
+    rectangle "Deposit\nAggregate" as agg2
+    rectangle "DepositSucceededEvent" as ev2 #FFF9C4
+}
+
+database "Axon Server\nEvent Store" as store
+queue "Event Processors\n(projection + publisher)" as processors
+
+' keep the reading order: use case 1 above use case 2
+uc1 -[hidden]down-> uc2
+
+' ---------- use case 1 ----------
+investor --> api1 : POST /v1/deposits
+api1 --> svc1 : InitiateDepositCommand
+svc1 --> agg1 : creates
+agg1 --> ev1 : produces
+ev1 --> store : stored
+
+' ---------- use case 2 ----------
+stripe --> inbox2 : webhook
+inbox2 --> svc2 : ApplyProviderDepositUpdateCommand
+svc2 --> store : retrieves events\nfor depositId
+store --> agg2 : replays events
+agg2 --> agg2 : updates state
+agg2 --> ev2 : produces
+ev2 --> store : stored
+
+' ---------- shared outcome ----------
+store --> processors : published
+
+note bottom of store
+  <b>Event store after both operations</b>
+
+  |= AGGREGATE_ID |= SEQ |= EVENT |
+  | 2b7f1f7d… | 0 | DEPOSIT_INITIATED |
+  | 2b7f1f7d… | 1 | DEPOSIT_PROVIDER_REFERENCE_REGISTERED |
+  | 2b7f1f7d… | 2 | DEPOSIT_SUCCEEDED |
+
+  Append-only. The aggregate itself is never written:
+  there is no row holding the deposit state.
+end note
+
+legend bottom
+  <b>The difference between the two use cases is the replay.</b>
+  Creating a deposit needs no history: the command handler is a static factory.
+  Changing one does: the aggregate is rebuilt from its events before it can decide,
+  and only then produces the new event.
+
+  <b>Only the event is persisted, never the aggregate.</b> Current state is a
+  function of the event history, so it can always be recomputed and never
+  disagrees with the log.
+
+  The read model in PostgreSQL is built by the projection downstream of
+  "published", and can be dropped and rebuilt from these same events.
+endlegend
+
+@enduml

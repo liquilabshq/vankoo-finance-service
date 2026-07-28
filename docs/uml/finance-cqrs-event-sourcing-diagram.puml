@@ -1,0 +1,100 @@
+@startuml finance-cqrs-event-sourcing-diagram
+
+title Vankoo Finance: CQRS and Event Sourcing Diagram
+
+skinparam shadowing false
+skinparam ArrowColor #212121
+skinparam rectangle {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+skinparam database {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+skinparam queue {
+    BorderColor #212121
+    BackgroundColor #FFFFFF
+}
+
+rectangle "Finance Bounded Context" as bc #FAFAFA {
+
+    rectangle "Interfaces — REST and webhooks" as api #FFFFFF {
+        rectangle "Deposit REST\nController" as ctrl
+        rectangle "Provider Webhook\nController" as hook
+    }
+
+    rectangle "Command Model" as cmdmodel #F5F9FF {
+        rectangle "Deposit Command Service\nWebhook Inbox Service\n<i>application.internal.commandservices</i>" as cmdsvc
+        rectangle "Deposit Aggregate\n@CommandHandler → validates invariants\n@EventSourcingHandler → assigns state\n<i>domain.model.aggregates</i>" as agg
+    }
+
+    rectangle "Query Model" as querymodel #F5FFF7 {
+        rectangle "Deposit Query Service\n@QueryHandler → DepositSummary\n<i>application.internal.queryservices</i>" as qsvc
+        rectangle "Deposit Projection\n@EventHandler\n@ProcessingGroup(deposit-read-model)\n<i>application.internal.queryservices</i>" as proj
+    }
+
+    rectangle "Deposit Event Publisher\n@EventHandler\n<i>application.internal.outboundservices</i>" as pub #FFFBF0
+}
+
+rectangle "Event Sourcing Infrastructure" as esinfra #FAFAFA {
+    database "Axon Server\nEvent Store" as store
+    queue "Axon Server\nEvent Router" as router
+}
+
+database "Read Model\nPostgreSQL · finance_read_model" as readmodel
+queue "Kafka\nvankoo.finance.events.v1" as kafka
+
+' keep the guide's layout: command model on the left, query model on the right.
+' the read model has to sit to the right of the event store, otherwise it drags
+' the whole query side over to the left.
+cmdmodel -[hidden]right-> querymodel
+esinfra -[hidden]right-> readmodel
+store -[hidden]right-> kafka
+
+' ---------- write side ----------
+ctrl --> cmdsvc : commands
+hook --> cmdsvc : normalized provider update
+cmdsvc --> agg : dispatch command
+agg --> store : store event
+agg --> router : raise event
+
+' ---------- read side ----------
+router --> proj : deliver event
+proj --> readmodel : update read model
+ctrl --> qsvc : queries
+qsvc --> readmodel : query read model
+
+' ---------- integration side ----------
+router --> pub : deliver event
+pub --> kafka : publish integration event
+
+' ---------- rehydration ----------
+store --> agg : replay events
+
+note right of agg
+  The aggregate is rehydrated from the
+  event store, never loaded from a table.
+  Only the event is persisted.
+end note
+
+note bottom of readmodel
+  Disposable. Drop the tables, replay the
+  event store, and the projection rebuilds.
+  Never used to validate an invariant.
+end note
+
+legend bottom
+  <b>One event stream, several subscribers.</b> The projection and the Kafka publisher
+  read the same stream independently. Adding a subscriber changes nothing on the
+  write side, which is the point of separating the two models.
+
+  <b>The two sides fail differently.</b> A command is rejected synchronously by the
+  aggregate; a projection or a publish can fail and be retried without ever putting
+  the event store in doubt. That asymmetry is why the read side must be idempotent.
+
+  <b>Queries never rehydrate the aggregate.</b> They read the projection and accept
+  eventual consistency after a command.
+endlegend
+
+@enduml
