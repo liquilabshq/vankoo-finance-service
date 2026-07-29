@@ -1,0 +1,37 @@
+server:
+  port: 8083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${FINANCE_DB_HOST:localhost}:${FINANCE_DB_PORT:5434}/${FINANCE_DB_NAME:vankoo_finance_db_dev}
+    username: ${FINANCE_DB_USERNAME:admin}
+    password: ${FINANCE_DB_PASSWORD:password}
+
+axon:
+  axonserver:
+    servers: ${AXON_SERVER_HOST:localhost}:${AXON_SERVER_PORT:8124} # En desarrollo, Axon Server corre suelto en localhost
+
+# Usamos logs de Hibernate para mostrar las consultas SQL, ya que nos da más control sobre el formato y la información
+logging:
+  level:
+    org.hibernate.SQL: debug
+
+eureka:
+  instance:
+    prefer-ip-address: false # En desarrollo, no es necesario usar IP, el hostname funciona bien
+  client:
+    register-with-eureka: true # Buscamos registrarnos en Eureka
+    fetch-registry: true # Queremos obtener la lista de servicios registrados para poder comunicarnos con ellos
+    service-url:
+      defaultZone: ${DISCOVERY_SERVER_URL:http://localhost:8761/eureka/} # En desarrollo, apuntamos a localhost para Eureka
+
+documentation:
+  local-url: http://localhost:${FINANCE_SERVICE_PORT:8083} # En desarrollo, el servicio se verá a través de localhost
+  gateway-url: http://localhost:${API_GATEWAY_PORT:8080}/finance # En desarrollo, el API Gateway se verá a través de localhost
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # En desarrollo, exponemos solo los endpoints de salud e info por temas de seguridad, pero también para no saturar el log
+        include: "health,info" # Importante para que Eureka vea el estado de Finance

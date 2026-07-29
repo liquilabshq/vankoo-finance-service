@@ -39,9 +39,9 @@ package "Finance Context" {
             - status : DepositStatus
             - failureReason : FailureReason
             # Deposit()
-            + {static} handle(command : InitiateDepositCommand, events : EventAppender) : String
-            + handle(command : RegisterDepositProviderReferenceCommand, events : EventAppender) : void
-            + handle(command : ApplyProviderDepositUpdateCommand, events : EventAppender) : void
+            + Deposit(command : InitiateDepositCommand)
+            + handle(command : RegisterDepositProviderReferenceCommand) : void
+            + handle(command : ApplyProviderDepositUpdateCommand) : void
             + on(event : DepositInitiatedEvent) : void
             + on(event : DepositProviderReferenceRegisteredEvent) : void
             + on(event : DepositSucceededEvent) : void
@@ -354,6 +354,10 @@ legend bottom
   <b>Domain events carry identifiers as plain String</b>, not as value objects: they are
   serialized into the event store and must stay stable across upcasting. The aggregate
   rebuilds the value objects in its @EventSourcingHandler methods.
+
+  <b>Axon 4 model.</b> Deposit is @Aggregate with @AggregateIdentifier on depositId. The
+  creating @CommandHandler is the constructor and events are emitted with apply(...).
+  Commands carry @TargetAggregateIdentifier for routing. See ADR-0002.
 endlegend
 
 @enduml

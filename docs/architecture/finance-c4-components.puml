@@ -17,7 +17,7 @@ Container(axon_server, "Axon Server", "Axon Server", "Event Store y router inter
 ContainerQueue(kafka, "Kafka", "Apache Kafka", "Broker de integración entre bounded contexts.")
 ContainerDb(finance_db, "Finance Database", "PostgreSQL", "Schema finance_read_model (deposit_view) y schema finance_ops (inbox, idempotencia, referencias).")
 
-Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 5") {
+Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 4") {
 
     ' ---------- interfaces ----------
     Component(deposit_api, "Deposit REST Controller", "interfaces.rest.controllers", "Recibe HTTP, valida el formato y delega en los command/query services.")
@@ -31,11 +31,11 @@ Container_Boundary(finance_service, "Finance Service - Spring Boot + Axon 5") {
     Component(provider_port, "PaymentProvider Port", "application.internal.outboundservices", "Contrato propio para crear, consultar y verificar cobros externos.")
 
     ' ---------- domain ----------
-    Component(deposit_aggregate, "Deposit Aggregate", "domain.model.aggregates", "@EventSourcedEntity(tagKey=depositId). Valida invariantes en el command handler antes de emitir.")
-    Component(domain_events, "Deposit Domain Events", "domain.model.events", "DepositInitiated, DepositSucceeded, DepositFailed y demás hechos de negocio, con @EventTag.")
+    Component(deposit_aggregate, "Deposit Aggregate", "domain.model.aggregates", "@Aggregate con @AggregateIdentifier. Valida invariantes en el command handler antes de emitir.")
+    Component(domain_events, "Deposit Domain Events", "domain.model.events", "DepositInitiated, DepositSucceeded, DepositFailed y demás hechos de negocio.")
 
     ' ---------- infrastructure ----------
-    Component(axon_config, "Axon Event-Sourcing Config", "infrastructure.eventstore.axon", "Conecta el agregado con Axon Server y configura el routing por depositId.")
+    Component(axon_config, "Axon Event-Sourcing Config", "infrastructure.eventstore.axon", "Conecta el agregado con Axon Server. El routing usa @TargetAggregateIdentifier sobre depositId.")
     Component(event_processor, "Deposit Event Processor", "infrastructure.eventstore.axon", "Consume el stream de Axon Server y distribuye eventos a la proyección y al publicador.")
     Component(read_projection, "Deposit Projection", "application.internal.queryservices", "@ProcessingGroup(deposit-read-model). @EventHandler que construye deposit_view de forma idempotente y reconstruible por replay.")
     Component(ops_repository, "Ops Repositories", "infrastructure.persistence.jpa.repositories", "Acceso JPA al inbox de webhooks, idempotencia de comandos y referencias del proveedor.")
@@ -69,8 +69,8 @@ Rel(command_service, axon_config, "Envía comandos")
 Rel(stripe_adapter, provider_port, "Implementa")
 
 ' ---------- escritura ----------
-Rel(axon_config, deposit_aggregate, "Carga por EventCriteria y dirige comandos")
-Rel(deposit_aggregate, domain_events, "Emite vía EventAppender")
+Rel(axon_config, deposit_aggregate, "Carga por replay y dirige comandos")
+Rel(deposit_aggregate, domain_events, "Emite vía apply(...)")
 Rel(domain_events, axon_config, "Se anexan al event store")
 Rel(axon_config, axon_server, "Persiste/reproduce eventos y enruta comandos", "Axon Protocol")
 

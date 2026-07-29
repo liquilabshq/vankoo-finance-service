@@ -1,0 +1,3 @@
+logging:
+  level:
+    org.hibernate.SQL: error # En producción, solo queremos ver errores relacionados con las consultas SQL

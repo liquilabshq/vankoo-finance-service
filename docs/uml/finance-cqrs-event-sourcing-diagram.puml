@@ -26,7 +26,7 @@ rectangle "Finance Bounded Context" as bc #FAFAFA {
 
     rectangle "Command Model" as cmdmodel #F5F9FF {
         rectangle "Deposit Command Service\nWebhook Inbox Service\n<i>application.internal.commandservices</i>" as cmdsvc
-        rectangle "Deposit Aggregate\n@CommandHandler → validates invariants\n@EventSourcingHandler → assigns state\n<i>domain.model.aggregates</i>" as agg
+        rectangle "Deposit Aggregate\n@Aggregate · @CommandHandler validates invariants\n@EventSourcingHandler assigns state\n<i>domain.model.aggregates</i>" as agg
     }
 
     rectangle "Query Model" as querymodel #F5FFF7 {
