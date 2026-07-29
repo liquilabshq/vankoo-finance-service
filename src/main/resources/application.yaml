@@ -1,3 +1,41 @@
 spring:
   application:
     name: vankoo-finance-service
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  datasource:
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate # Validamos que el esquema de la base de datos coincide con las entidades JPA, pero no hacemos cambios automáticos
+      naming:
+        physical-strategy: com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.configuration.strategy.SnakeCaseWithPluralizedTablePhysicalNamingStrategy
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+axon:
+  axonserver:
+    # La edición gratuita de Axon Server (Standard/Developer) limita a 1 contexto,
+    # y viene fijo con el nombre "default" — no admite un nombre custom como "finance".
+    # Verificado arrancando contra un Axon Server standalone real (maxContexts: 1).
+    context: default
+  serializer:
+    general: jackson
+
+scalar:
+  enabled: true
+  theme: mars
+  dark-mode: true
+
+documentation:
+  application:
+    title: @project.name@
+    description: @project.description@
+    version: @project.version@

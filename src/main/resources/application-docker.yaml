@@ -1,0 +1,41 @@
+server:
+  port: 8083 # El puerto interno del contenedor
+
+spring:
+  datasource:
+    # Dentro de Docker, el host es el nombre del servicio de la DB en el compose
+    url: jdbc:postgresql://${FINANCE_DB_HOST:finance-db-postgres}:${FINANCE_DB_PORT:5432}/${FINANCE_DB_NAME:vankoo_finance_db_dev}
+    username: ${FINANCE_DB_USERNAME:admin}
+    password: ${FINANCE_DB_PASSWORD:password}
+
+axon:
+  axonserver:
+    # Dentro de Docker, el host es el nombre del servicio de Axon Server en el compose
+    servers: ${AXON_SERVER_HOST:axon-server}:${AXON_SERVER_PORT:8124}
+
+logging:
+  level:
+    org.hibernate.SQL: debug
+
+eureka:
+  instance:
+    # Usamos el nombre que le daremos al servicio en el docker-compose
+    hostname: ${FINANCE_SERVICE_HOST:finance-service}
+    prefer-ip-address: true # CRÍTICO para comunicación entre contenedores
+  client:
+    register-with-eureka: true
+    fetch-registry: true
+    service-url:
+      defaultZone: ${DISCOVERY_SERVER_URL:http://discovery-server:8761/eureka/}
+
+documentation:
+  local-url: http://${FINANCE_DOCUMENTATION_SERVER_URL:localhost}:${FINANCE_SERVICE_PORT:8083} # En Docker, el servicio se verá a través del puerto 8083
+  gateway-url: http://${FINANCE_DOCUMENTATION_GATEWAY_URL:localhost}:${API_GATEWAY_PORT:8080}/finance # En Docker, el API Gateway se verá a través del puerto 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # En Docker, es útil exponer todos los endpoints de gestión para monitoreo y debugging
+        # Ya que la red es interna, no hay riesgo de exponer información sensible al exterior
+        include: "*"
