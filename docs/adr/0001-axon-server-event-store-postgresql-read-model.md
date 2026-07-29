@@ -1,7 +1,7 @@
 # ADR-0001: Axon Server como Event Store y PostgreSQL como Read Model
 
 - **Estado:** Aceptado
-- **Fecha:** 2026-07-25 (revisado 2026-07-26)
+- **Fecha:** 2026-07-25 (revisado 2026-07-26, 2026-07-29)
 - **Contexto:** `vankoo-finance-service` / bounded context Finance
 - **Decisores:** Salim y Anjali
 - **Complementado por:** [ADR-0002 — Versión de Axon y licencia de Axon Server](0002-axon-version-and-server-licensing.md)
@@ -28,7 +28,13 @@ Adoptamos la siguiente arquitectura:
    - Gestionará la distribución interna de comandos y eventos entre las
      instancias de `finance-service`.
    - Todas las instancias de Finance se conectarán al mismo contexto lógico de
-     Axon Server, denominado `finance`.
+     Axon Server, denominado **`default`**. La edición gratuita de Axon Server
+     (Standard/Developer) limita a un solo contexto por instancia
+     (`maxContexts: 1`) y lo fija con ese nombre — no admite renombrarlo a
+     `finance` ni crear uno adicional, eso es exclusivo de Enterprise.
+     Verificado arrancando un Axon Server standalone real e inspeccionando
+     `/v1/public/me`. Detalle en el
+     [ADR-0002](0002-axon-version-and-server-licensing.md).
    - Se desplegará como **instancia única (standalone)**, tanto en desarrollo
      como en el despliegue académico. **El clustering queda descartado**: los
      términos de AxonIQ clasifican cualquier cluster de más de un nodo fuera del
