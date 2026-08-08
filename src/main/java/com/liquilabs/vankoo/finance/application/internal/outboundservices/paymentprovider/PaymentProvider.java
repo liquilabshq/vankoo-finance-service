@@ -11,10 +11,10 @@ package com.liquilabs.vankoo.finance.application.internal.outboundservices.payme
  * <p>No provider SDK type crosses this boundary in either direction: not in the
  * parameters, not in the return values, not in the exceptions.
  */
-/*
+
 public interface PaymentProvider {
 
-    */
+
 /**
      * Creates the charge resource on the provider's side.
      *
@@ -50,6 +50,6 @@ public interface PaymentProvider {
      * @throws InvalidWebhookSignatureException if the signature does not validate
      *//*
 
-    VerifiedProviderDepositUpdate verifyWebhook(String rawPayload, String signature);
+    VerifiedProviderDepositUpdate verifyWebhook(String rawPayload, String signature);    */
 }
-*/
+
