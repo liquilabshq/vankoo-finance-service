@@ -29,6 +29,13 @@ axon:
   serializer:
     general: jackson
 
+stripe:
+  enabled: ${STRIPE_ENABLED:true}
+  secret-key: ${STRIPE_SECRET_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+  success-url: ${STRIPE_SUCCESS_URL:}
+  cancel-url: ${STRIPE_CANCEL_URL:}
+
 scalar:
   enabled: true
   theme: mars
