@@ -1,14 +1,5 @@
 package com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider;
 
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.InvalidWebhookSignatureException;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.PaymentProviderException;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.RetryablePaymentProviderException;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.CreateProviderDepositRequest;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositCreated;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositReference;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositStatus;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
-
 /**
  * Outbound port towards payment providers.
  *
@@ -20,28 +11,34 @@ import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymen
  * <p>No provider SDK type crosses this boundary in either direction: not in the
  * parameters, not in the return values, not in the exceptions.
  */
+
 public interface PaymentProvider {
 
-    /**
+
+/**
      * Creates the charge resource on the provider's side.
      *
      * @throws PaymentProviderException if the creation does not complete; see
      *         {@link RetryablePaymentProviderException} to tell whether
      *         retrying is worthwhile
-     */
+     *//*
+
     ProviderDepositCreated createDeposit(CreateProviderDepositRequest request);
 
-    /**
+    */
+/**
      * Reads the resource's current status from the provider.
      *
      * <p>This is the reconciliation path when a webhook is lost: Finance asks
      * instead of waiting.
      *
      * @throws PaymentProviderException if the read does not complete
-     */
+     *//*
+
     ProviderDepositStatus getDeposit(ProviderDepositReference reference);
 
-    /**
+    */
+/**
      * Verifies the webhook's authenticity and normalizes its content.
      *
      * <p>The payload arrives raw and uninterpreted on purpose: the signature is
@@ -51,6 +48,8 @@ public interface PaymentProvider {
      * @param rawPayload the HTTP body exactly as received, never re-serialized
      * @param signature  the provider's signature header
      * @throws InvalidWebhookSignatureException if the signature does not validate
-     */
-    VerifiedProviderDepositUpdate verifyWebhook(String rawPayload, String signature);
+     *//*
+
+    VerifiedProviderDepositUpdate verifyWebhook(String rawPayload, String signature);    */
 }
+
