@@ -1,4 +1,4 @@
-package com.liquilabs.vankoo.finance.domain.model.exceptions;
+package com.liquilabs.vankoo.finance.domain.exceptions;
 
 /**
  * A provider reference operation does not match the deposit's current state

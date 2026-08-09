@@ -51,7 +51,10 @@ com.liquilabs.vankoo.finance
 │   └── messaging/eventhandlers      # events from OTHER bounded contexts (empty in v1)
 ├── application/internal/{commandservices, queryservices, outboundservices}
 ├── domain/
-│   ├── model/{aggregates, entities, commands, queries, events, valueobjects, exceptions}
+│   ├── model/{aggregates, entities, commands, queries, events, valueobjects}
+│   ├── exceptions/                  # business exceptions the aggregate throws
+│   │                                 # (InvalidDepositAmountException, ...) — NOT the
+│   │                                 # PaymentProvider port's own exceptions, see below
 │   └── services/                    # INTERFACES ONLY
 └── infrastructure/{eventstore/axon, persistence/jpa/repositories,
                     brokers/kafka, providers/stripe, configuration}
@@ -236,7 +239,10 @@ are conventional commits in English, with a body explaining the why.
 
 The contract has a **"Decisiones pendientes"** section listing what is genuinely
 undecided, each with the reason it was deferred rather than guessed. Two examples
-worth knowing: whether the port's provisional value objects move into the domain,
-and `failureReason` currently travelling as a free `String` where the contract
-defines an enum. Both are resolved when the aggregate is written — do not settle
-them opportunistically.
+worth knowing, both touched by Card 3 (the aggregate): `ProviderDepositId`,
+`ProviderEventId`, `IdempotencyKey`, `NormalizedDepositStatus` and `FailureReason`
+now live in `domain/model/valueobjects` — but the port itself
+(`PaymentProvider`, `StripePaymentProvider`, `StripePaymentProperties`) was
+**deliberately left untouched**, still on its provisional, Stripe-SDK-owner's
+copy. Adapting the port to import the real domain types is that owner's work,
+not something to do opportunistically from elsewhere.

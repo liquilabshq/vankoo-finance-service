@@ -6,7 +6,7 @@ package com.liquilabs.vankoo.finance.domain.model.valueobjects;
  * <p>{@code amountMinor > 0} is <strong>not</strong> enforced here on purpose:
  * the {@code Deposit} aggregate checks it in its {@code @CommandHandler}
  * constructor, literally as the course guide's example does (see ADR-0002),
- * so {@link com.liquilabs.vankoo.finance.domain.model.exceptions.InvalidDepositAmountException}
+ * so {@link com.liquilabs.vankoo.finance.domain.exceptions.InvalidDepositAmountException}
  * stays a real, reachable business rule instead of dead code.
  */
 public record Money(long amountMinor, Currency currency) {

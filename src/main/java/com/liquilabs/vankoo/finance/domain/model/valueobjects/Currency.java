@@ -1,6 +1,6 @@
 package com.liquilabs.vankoo.finance.domain.model.valueobjects;
 
-import com.liquilabs.vankoo.finance.domain.model.exceptions.UnsupportedCurrencyException;
+import com.liquilabs.vankoo.finance.domain.exceptions.UnsupportedCurrencyException;
 
 /**
  * Currency catalogue supported by Finance in v1. Modeled as an enum so an

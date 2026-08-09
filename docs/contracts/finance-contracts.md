@@ -768,8 +768,9 @@ com.liquilabs.vankoo.finance
 │   │   ├── commands/      # InitiateDepositCommand, ...
 │   │   ├── queries/       # GetDepositByIdQuery, ListDepositsByAccountQuery, DepositSummary
 │   │   ├── events/        # DepositInitiatedEvent, ...
-│   │   ├── valueobjects/  # DepositId, AccountId, Money, DepositStatus, ...
-│   │   └── exceptions/    # excepciones de negocio
+│   │   └── valueobjects/  # DepositId, AccountId, Money, DepositStatus, ...
+│   ├── exceptions/         # excepciones de negocio del agregado
+│   │                       # (InvalidDepositAmountException, ProviderReferenceMismatchException, ...)
 │   └── services/          # SOLO interfaces: DepositCommandService, DepositQueryService
 └── infrastructure/                # eje de clasificación: rol, luego tecnología
     ├── eventstore/axon/           # conexión, serializer, token store, event processors
@@ -899,6 +900,38 @@ identifica. Nosotros los agrupamos todos en `valueobjects`, porque tenemos cinco
 tipos de identificador y dispersarlos entre paquetes según a quién identifican
 haría más difícil encontrarlos.
 
+### `domain/exceptions`, no `domain/model/exceptions`
+
+Ajuste de estructura hecho en la Tarjeta 3: las excepciones de negocio del
+agregado (`InvalidDepositAmountException`, `UnsupportedCurrencyException`,
+`ProviderReferenceMismatchException`, `TerminalStateTransitionException`)
+viven en `domain/exceptions/`, hermano de `domain/model/`, no anidadas dentro
+de él. Sigue la convención que ya usa `uflex` (otro proyecto de LiquiLabs)
+para su bounded context `subscription`.
+
+**Solo las excepciones que usa `Deposit` directamente están acá.** La
+jerarquía sellada del puerto de pagos (`PaymentProviderException` y sus hijas)
+**no** se movió — sigue siendo responsabilidad exclusiva de quien mantiene el
+puerto (ver más abajo), y esta tarjeta no la toca.
+
+### El puerto `PaymentProvider` sigue provisional — no es responsabilidad de esta tarjeta resolverlo
+
+La Tarjeta 5 dejó el puerto `PaymentProvider` con sus tipos anidados
+temporalmente dentro de `StripePaymentProperties`, marcados explícitamente
+como `PROVISIONAL` a la espera de que existiera `domain/`. La Tarjeta 3 crea
+`domain/` pero **deliberadamente no toca esa capa**: `PaymentProvider.java`,
+`StripePaymentProvider.java` y `StripePaymentProperties.java` quedan tal como
+los dejó Anjali, sin modificar.
+
+Motivo: esas clases son mantenidas por quien construyó el adaptador de
+Stripe, y son ella quien decide cuándo y cómo adaptarlas ahora que `domain`
+existe — no corresponde que esta tarjeta le imponga una forma. Los tipos que
+la Tarjeta 3 sí deja listos en `domain/model/valueobjects` para que ella los
+use cuando haga esa adaptación: `IdempotencyKey`, `ProviderDepositId`,
+`ProviderEventId`, `NormalizedDepositStatus` (reubicados, antes vivían en el
+puerto) y `FailureReason` (nuevo). Ver "Decisiones pendientes" para el detalle
+de qué queda resuelto y qué sigue abierto.
+
 ### No hay módulo `shareddomain`
 
 La guía comparte los eventos entre bounded contexts como **la misma clase Java**:
@@ -952,29 +985,29 @@ negocio.
 
 ## Decisiones pendientes
 
-- **Tipos provisionales del puerto `PaymentProvider` (Tarjeta 5, pendiente de
-  revisión de Salim).** `ProviderDepositId`, `ProviderEventId`,
-  `IdempotencyKey` y el enum `NormalizedDepositStatus` se definieron en
-  `application/internal/outboundservices/paymentprovider` porque
-  `domain/model/valueobjects` todavía no existe. Al implementar el agregado
-  (Tarjeta 3) hay que decidir si se reubican en `domain` —los comandos
-  `RegisterDepositProviderReferenceCommand` y `ApplyProviderDepositUpdateCommand`
-  también los referencian— o si se quedan como tipos propios del puerto con un
-  mapeo explícito en la frontera. Mantenerlos separados permite que la taxonomía
-  del proveedor evolucione sin tocar el dominio; fundirlos elimina el mapeo.
-  Hoy nadie fuera de `outboundservices` los consume, así que el refactor es
-  barato en cualquiera de las dos direcciones.
+- ~~Tipos provisionales del puerto `PaymentProvider` (Tarjeta 5, pendiente de
+  revisión de Salim)~~ → **resuelto en la Tarjeta 3, mitad hecho por diseño.**
+  `ProviderDepositId`, `ProviderEventId`, `IdempotencyKey` y
+  `NormalizedDepositStatus` ya viven en `domain/model/valueobjects` — los
+  comandos `RegisterDepositProviderReferenceCommand` y
+  `ApplyProviderDepositUpdateCommand` los referencian directamente ahí. **Lo
+  que sigue pendiente:** el puerto `PaymentProvider` y su adaptador
+  (`StripePaymentProvider`, con sus tipos hoy anidados en
+  `StripePaymentProperties`) todavía no importan estos tipos de `domain` —
+  siguen con sus copias provisionales, sin tocar, porque esa capa es
+  responsabilidad de quien construyó el adaptador. Adaptarla es trabajo suyo,
+  no de esta tarjeta.
 - ~~Confirmar con Anjali la taxonomía de estados que cada proveedor puede
   normalizar~~ → **resuelto** en la Tarjeta 5: `NormalizedDepositStatus` define
   `ACTION_REQUIRED`, `PROCESSING`, `SUCCEEDED`, `FAILED` y `CANCELLED`, que
   coinciden con la tabla de mapeo de abajo. Excluye `PENDING` a propósito: es el
   estado inicial que el agregado se da a sí mismo, nunca una observación externa.
-- **`failureReason` viaja como `String` libre** en `VerifiedProviderDepositUpdate`
-  y `ProviderDepositStatus`, donde este contrato define un enum de cinco valores.
-  Con `String`, el código crudo del proveedor puede filtrarse hacia dentro. Se
-  corrige en la Tarjeta 3, al crear `FailureReason` en `domain/model/valueobjects`
-  y montar el mapeo — hacerlo antes obligaría a crear el enum dentro del paquete
-  del puerto, que es justo la ubicación que quedó por decidir.
+- **`FailureReason` ya existe en `domain/model/valueobjects`** (Tarjeta 3), con
+  los cinco valores que este contrato define. **Pero el puerto todavía no lo
+  usa:** `failureReason` sigue viajando como `String` libre dentro del bloque
+  provisional de `StripePaymentProperties`, sin cambiar — el enum queda listo
+  para que se use cuando se adapte esa capa, pero montar el mapeo ahí es parte
+  de esa adaptación pendiente, no de esta tarjeta.
 - **Diseño de `Wallet` con dos monedas:** un monedero por moneda o uno con un
   saldo por moneda, y si una recarga en USD puede financiar una factura en PEN.
 - Confirmar con Anjali que Stripe puede liquidar tanto `PEN` como `USD` para la

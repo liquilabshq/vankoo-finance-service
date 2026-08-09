@@ -1,4 +1,4 @@
-package com.liquilabs.vankoo.finance.domain.model.exceptions;
+package com.liquilabs.vankoo.finance.domain.exceptions;
 
 /**
  * The deposit is already in a terminal state ({@code SUCCEEDED}, {@code FAILED}
