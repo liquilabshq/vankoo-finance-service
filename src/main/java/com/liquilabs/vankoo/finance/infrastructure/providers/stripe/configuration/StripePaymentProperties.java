@@ -235,9 +235,9 @@ public class StripePaymentProperties {
      */
     public abstract static sealed class PaymentProviderException extends RuntimeException
             permits PaymentProviderTimeoutException,
-                    PaymentProviderUnavailableException,
-                    PaymentProviderRejectedException,
-                    InvalidWebhookSignatureException {
+            PaymentProviderUnavailableException,
+            PaymentProviderRejectedException,
+            InvalidWebhookSignatureException {
 
         protected PaymentProviderException(String message) {
             super(message);
