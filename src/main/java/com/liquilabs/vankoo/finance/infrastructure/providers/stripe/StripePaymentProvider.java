@@ -1,20 +1,21 @@
 package com.liquilabs.vankoo.finance.infrastructure.providers.stripe;
 
 import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.PaymentProvider;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.InvalidWebhookSignatureException;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.PaymentProviderException;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.PaymentProviderRejectedException;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.PaymentProviderTimeoutException;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.exceptions.PaymentProviderUnavailableException;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.CreateProviderDepositRequest;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositCreated;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositReference;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositStatus;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.FailureReason;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.NormalizedDepositStatus;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderEventId;
 import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.CreateProviderDepositRequest;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.InvalidWebhookSignatureException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.NormalizedDepositStatus;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderRejectedException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderTimeoutException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderUnavailableException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositCreated;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositId;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositReference;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositStatus;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderEventId;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.VerifiedProviderDepositUpdate;
 import com.stripe.Stripe;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.ApiException;
@@ -57,10 +58,6 @@ import java.util.Set;
  * <p>Neither timeout nor retry live here. The contract assigns them to whoever
  * orchestrates the use case; this adapter only <em>signals</em> which failures
  * are transient, through {@code RetryablePaymentProviderException}.
- *
- * <p>TODO: the port's types are temporarily nested in
- * {@link StripePaymentProperties}. When the domain layer lands, only the
- * imports above change — nothing in the logic below does.
  */
 @Service
 public class StripePaymentProvider implements PaymentProvider {
@@ -238,10 +235,9 @@ public class StripePaymentProvider implements PaymentProvider {
                 new ProviderEventId(event.getId()),
                 status,
                 Instant.ofEpochSecond(event.getCreated()),
-                // TODO: Checkout Session exposes no normalized failure reason, so a failed
-                // async payment can only be reported as UNKNOWN. Resolved when the contract's
-                // FailureReason enum lands in domain/model/valueobjects.
-                status == NormalizedDepositStatus.FAILED ? "UNKNOWN" : null,
+                // Checkout Session exposes no normalized failure reason, so a failed
+                // async payment can only be reported as UNKNOWN.
+                status == NormalizedDepositStatus.FAILED ? FailureReason.UNKNOWN : null,
                 status == NormalizedDepositStatus.CANCELLED ? "EXPIRED" : null);
     }
 
