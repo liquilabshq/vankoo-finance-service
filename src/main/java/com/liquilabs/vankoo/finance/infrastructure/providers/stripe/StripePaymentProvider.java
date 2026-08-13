@@ -1,20 +1,24 @@
 package com.liquilabs.vankoo.finance.infrastructure.providers.stripe;
 
 import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.PaymentProvider;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositCreated;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositStatus;
+import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
+import com.liquilabs.vankoo.finance.domain.exceptions.InvalidWebhookSignatureException;
+import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderException;
+import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderRejectedException;
+import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderTimeoutException;
+import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderUnavailableException;
+import com.liquilabs.vankoo.finance.domain.exceptions.UnsupportedProviderEventException;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.FailureReason;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.IdempotencyKey;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.Money;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.NormalizedDepositStatus;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.Provider;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderEventId;
 import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.CreateProviderDepositRequest;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.InvalidWebhookSignatureException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.NormalizedDepositStatus;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderRejectedException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderTimeoutException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.PaymentProviderUnavailableException;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositCreated;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositId;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositReference;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderDepositStatus;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.ProviderEventId;
-import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties.VerifiedProviderDepositUpdate;
 import com.stripe.Stripe;
 import com.stripe.exception.ApiConnectionException;
 import com.stripe.exception.ApiException;
@@ -57,30 +61,20 @@ import java.util.Set;
  * <p>Neither timeout nor retry live here. The contract assigns them to whoever
  * orchestrates the use case; this adapter only <em>signals</em> which failures
  * are transient, through {@code RetryablePaymentProviderException}.
- *
- * <p>TODO: the port's types are temporarily nested in
- * {@link StripePaymentProperties}. When the domain layer lands, only the
- * imports above change — nothing in the logic below does.
  */
 @Service
 public class StripePaymentProvider implements PaymentProvider {
 
-    /**
-     * Value of the {@code provider} field. A private constant until the domain
-     * has an enum of supported providers.
-     */
-    private static final String PROVIDER = "stripe";
+    private static final Provider PROVIDER = Provider.STRIPE;
 
     private static final String PRODUCT_NAME = "Vankoo balance top-up";
 
     /**
      * The only event types this adapter understands. It is also the exact list
      * the Stripe webhook endpoint must be subscribed to: anything else reaching
-     * us is a misconfiguration, not a deposit update.
-     *
-     * <p>TODO (Tarjeta 7): the port's signature has to return a non-null update,
-     * so an unexpected type can only be rejected here. When the webhook
-     * controller exists, it should decide the status code for that case.
+     * us is a misconfiguration, not a deposit update, and it is reported as
+     * {@link UnsupportedProviderEventException} so the webhook endpoint can
+     * acknowledge it instead of making Stripe retry forever.
      */
     private static final Set<String> SUPPORTED_EVENT_TYPES = Set.of(
             "checkout.session.completed",
@@ -100,7 +94,18 @@ public class StripePaymentProvider implements PaymentProvider {
      *
      * @throws PaymentProviderException if the creation does not complete
      */
-    public ProviderDepositCreated createDeposit(CreateProviderDepositRequest request) {
+    @Override
+    public ProviderDepositCreated createDeposit(IdempotencyKey idempotencyKey,
+                                                DepositId depositId,
+                                                Money amount,
+                                                String description) {
+        if (amount.amountMinor() <= 0) {
+            // Money does not enforce it — the aggregate does, so that the business
+            // rule stays reachable. Repeated here because Stripe would answer with
+            // an opaque rejection instead.
+            throw new PaymentProviderRejectedException(
+                    "amountMinor must be greater than zero, was: " + amount.amountMinor());
+        }
         requireUsableCredentials();
         requireConfigured(stripePaymentProperties.getSuccessUrl(), "stripe.success-url");
         requireConfigured(stripePaymentProperties.getCancelUrl(), "stripe.cancel-url");
@@ -113,22 +118,22 @@ public class StripePaymentProvider implements PaymentProvider {
                 .setCancelUrl(stripePaymentProperties.getCancelUrl())
                 // Two independent ways back to the deposit: client_reference_id is what
                 // Stripe echoes in the dashboard, metadata is what survives in the API.
-                .setClientReferenceId(request.depositId())
-                .putMetadata("deposit_id", request.depositId())
+                .setClientReferenceId(depositId.toString())
+                .putMetadata("deposit_id", depositId.toString())
                 .addLineItem(
                         SessionCreateParams.LineItem.builder()
                                 .setQuantity(1L)
                                 .setPriceData(
                                         SessionCreateParams.LineItem.PriceData.builder()
-                                                .setCurrency(request.currency().toLowerCase())
+                                                .setCurrency(amount.currency().name().toLowerCase())
                                                 // amountMinor is ALREADY in minor units, unlike the
                                                 // BigDecimal amounts other services carry. Do not
                                                 // scale it here or every deposit is charged x100.
-                                                .setUnitAmount(request.amountMinor())
+                                                .setUnitAmount(amount.amountMinor())
                                                 .setProductData(
                                                         SessionCreateParams.LineItem.PriceData.ProductData.builder()
                                                                 .setName(PRODUCT_NAME)
-                                                                .setDescription(productDescription(request))
+                                                                .setDescription(productDescription(depositId, description))
                                                                 .build()
                                                 )
                                                 .build()
@@ -140,7 +145,7 @@ public class StripePaymentProvider implements PaymentProvider {
         // This is the contract's mapping of IdempotencyKey onto Stripe's own
         // Idempotency-Key header: it stops a retry from creating a second charge.
         var options = RequestOptions.builder()
-                .setIdempotencyKey(request.idempotencyKey().value())
+                .setIdempotencyKey(idempotencyKey.value())
                 .build();
 
         try {
@@ -164,13 +169,21 @@ public class StripePaymentProvider implements PaymentProvider {
      *
      * @throws PaymentProviderException if the read does not complete
      */
-    public ProviderDepositStatus getDeposit(ProviderDepositReference reference) {
+    @Override
+    public ProviderDepositStatus getDeposit(Provider provider, ProviderDepositId providerDepositId) {
+        if (provider != PROVIDER) {
+            // One adapter, one provider. Being asked about another one is a wiring
+            // mistake, and answering anyway would report Stripe's view of an
+            // identifier that belongs to somebody else.
+            throw new PaymentProviderRejectedException(
+                    "This adapter only serves " + PROVIDER + ", was asked about " + provider);
+        }
         requireUsableCredentials();
 
         Stripe.apiKey = stripePaymentProperties.getSecretKey();
 
         try {
-            Session session = Session.retrieve(reference.providerDepositId().value());
+            Session session = Session.retrieve(providerDepositId.value());
             return new ProviderDepositStatus(
                     new ProviderDepositId(session.getId()),
                     normalize(session),
@@ -193,6 +206,7 @@ public class StripePaymentProvider implements PaymentProvider {
      * @param signature  the {@code Stripe-Signature} header
      * @throws InvalidWebhookSignatureException if the signature does not validate
      */
+    @Override
     public VerifiedProviderDepositUpdate verifyWebhook(String rawPayload, String signature) {
         requireConfigured(stripePaymentProperties.getWebhookSecret(), "stripe.webhook-secret");
 
@@ -219,7 +233,7 @@ public class StripePaymentProvider implements PaymentProvider {
         // Checked before touching the payload so that an unrelated event reports the
         // type it actually had, instead of failing later as "not a Checkout Session".
         if (!SUPPORTED_EVENT_TYPES.contains(eventType)) {
-            throw new PaymentProviderRejectedException("Unsupported Stripe event type: " + eventType);
+            throw new UnsupportedProviderEventException("Unsupported Stripe event type: " + eventType);
         }
 
         Session session = extractSession(event);
@@ -238,10 +252,10 @@ public class StripePaymentProvider implements PaymentProvider {
                 new ProviderEventId(event.getId()),
                 status,
                 Instant.ofEpochSecond(event.getCreated()),
-                // TODO: Checkout Session exposes no normalized failure reason, so a failed
-                // async payment can only be reported as UNKNOWN. Resolved when the contract's
-                // FailureReason enum lands in domain/model/valueobjects.
-                status == NormalizedDepositStatus.FAILED ? "UNKNOWN" : null,
+                // Checkout Session exposes no normalized failure reason, so a failed async
+                // payment can only be reported as UNKNOWN. Reconciliation via getDeposit on
+                // the PaymentIntent is the path to a finer reason, and it is not in v1.
+                status == NormalizedDepositStatus.FAILED ? FailureReason.UNKNOWN : null,
                 status == NormalizedDepositStatus.CANCELLED ? "EXPIRED" : null);
     }
 
@@ -355,10 +369,10 @@ public class StripePaymentProvider implements PaymentProvider {
         }
     }
 
-    private String productDescription(CreateProviderDepositRequest request) {
-        if (request.description() == null || request.description().isBlank()) {
-            return "Deposit %s".formatted(request.depositId());
+    private String productDescription(DepositId depositId, String description) {
+        if (description == null || description.isBlank()) {
+            return "Deposit %s".formatted(depositId);
         }
-        return request.description();
+        return description;
     }
 }

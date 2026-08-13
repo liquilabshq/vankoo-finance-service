@@ -52,12 +52,12 @@ com.liquilabs.vankoo.finance
 ├── application/internal/{commandservices, queryservices, outboundservices}
 ├── domain/
 │   ├── model/{aggregates, entities, commands, queries, events, valueobjects}
-│   ├── exceptions/                  # business exceptions the aggregate throws
-│   │                                 # (InvalidDepositAmountException, ...) — NOT the
-│   │                                 # PaymentProvider port's own exceptions, see below
+│   ├── exceptions/                  # what the aggregate throws
+│   │                                 # (InvalidDepositAmountException, ...) AND the
+│   │                                 # sealed PaymentProvider hierarchy, see below
 │   └── services/                    # INTERFACES ONLY
-└── infrastructure/{eventstore/axon, persistence/jpa/repositories,
-                    brokers/kafka, providers/stripe, configuration}
+└── infrastructure/{eventstore/axon, persistence/jpa/{entities, converters,
+                    repositories}, brokers/kafka, providers/stripe, configuration}
 ```
 
 ### Dependency rules that differ from the usual advice
@@ -106,16 +106,39 @@ fail**, never silently convert.
 **HTTP resources:** `CreateXResource` for a request, `XResource` for a response.
 
 **Validation goes in the compact constructor of a record.** See
-`CreateProviderDepositRequest`, which rejects a non-positive amount but only
-checks the ISO 4217 *shape* of the currency — whether it is in the supported
-catalogue is a business invariant the aggregate enforces before the port is ever
-called. That split is deliberate; keep it.
+`VerifiedProviderDepositUpdate`, which rejects a missing `providerEventId`
+outright — without it the inbox has nothing to deduplicate on.
 
-**Provider errors are a `sealed` hierarchy** rooted at
-`PaymentProviderException`, with `RetryablePaymentProviderException` as a marker
-interface. Callers decide whether to retry by type, never by `instanceof` chains
-against concrete classes or by matching message text. Because there is no
-`module-info.java`, the `permits` classes must live in that same package.
+The ISO 4217 shape check the port used to do is gone: `Currency` is an enum, so
+an unsupported currency cannot be represented once inside the domain. What
+remains of that split is `amountMinor > 0`, still enforced by the aggregate and
+repeated in the Stripe adapter, because `Money` deliberately does not enforce it.
+
+**`PaymentProvider.java` is three method signatures and nothing else.** Inputs
+travel as loose parameters — there is no `CreateProviderDepositRequest`. The three
+return types live in `outboundservices/paymentprovider/model`, the errors in
+`domain/exceptions`.
+
+**What decides whether a provider-facing type belongs in `domain`: who
+references it.** `ProviderDepositId`, `ProviderEventId`,
+`NormalizedDepositStatus` and `FailureReason` are in `domain/model/valueobjects`
+because the two commands reference them. The port's three return types are
+referenced by nothing in `domain` — `Deposit` never sees one — so they are
+integration vocabulary and live with the port. They were briefly moved into
+`valueobjects` during Card 7 and moved back for exactly this reason; they are
+value objects by shape, not by meaning.
+
+**`domain/exceptions` holds two families**, and they are not the same thing: what
+the aggregate throws (`InvalidDepositAmountException`, …), and the `sealed`
+`PaymentProviderException` hierarchy the Stripe adapter throws. The first rejects
+a command; the second produces no domain event at all. Callers decide whether to
+retry by type — `RetryablePaymentProviderException` is a marker interface — never
+by `instanceof` chains against concrete classes or by matching message text.
+Because there is no `module-info.java`, the `permits` classes must stay in that
+package. `UnsupportedProviderEventException` is separate from
+`PaymentProviderRejectedException` so the webhook endpoint can answer `200` to an
+event type we do not handle — an error there would only make Stripe retry it
+forever.
 
 **Assemblers are static**, like the guide's `BookCargoCommandDTOAssembler`. Note
 that the `Idempotency-Key` arrives as an HTTP header, not in the body, so the
@@ -168,11 +191,27 @@ are easy to break:
 
 1. The `200` is returned **after inserting into the inbox, not after the
    command**. Stripe retries on slow responses, so waiting manufactures more
-   duplicates.
+   duplicates. `WebhookInboxService.accept` therefore does one thing only.
 2. A webhook arriving **before** the provider reference is registered is parked
    and retried, never rejected — and **never creates a deposit**.
 3. Terminal aggregate states make a repeat harmless even if a duplicate slips
    past the inbox.
+
+Implementation notes that are not obvious from the diagram:
+
+- **Deduplication is one statement**, `INSERT ... ON CONFLICT DO NOTHING`
+  returning row count. An `exists()` then `insert` leaves a race in which two
+  simultaneous deliveries both insert.
+- **`PARKED` is not a failure state.** A row that exhausts its attempts stops
+  being picked up (the sweep filters on `attempts`) but stays `PARKED` for a
+  human. `DISCARDED` is only for what the aggregate refuses permanently.
+- **Table names are plural** — `provider_webhook_inboxes`,
+  `deposit_provider_references` — because the naming strategy pluralizes and
+  `ddl-auto=validate` compares against that, not against the singular names the
+  contract uses in prose.
+- **`@EnableJpaAuditing` lives in `JpaAuditingConfiguration`, not on the
+  application class.** On the application class it breaks every `@WebMvcTest`
+  slice with "JPA metamodel must not be empty".
 
 ## Commands and workflows
 
@@ -238,11 +277,17 @@ are conventional commits in English, with a body explaining the why.
 - `docs/uml/`, `docs/architecture/` — domain model, flows, sequence, C4
 
 The contract has a **"Decisiones pendientes"** section listing what is genuinely
-undecided, each with the reason it was deferred rather than guessed. Two examples
-worth knowing, both touched by Card 3 (the aggregate): `ProviderDepositId`,
-`ProviderEventId`, `IdempotencyKey`, `NormalizedDepositStatus` and `FailureReason`
-now live in `domain/model/valueobjects` — but the port itself
-(`PaymentProvider`, `StripePaymentProvider`, `StripePaymentProperties`) was
-**deliberately left untouched**, still on its provisional, Stripe-SDK-owner's
-copy. Adapting the port to import the real domain types is that owner's work,
-not something to do opportunistically from elsewhere.
+undecided, each with the reason it was deferred rather than guessed. Card 7 closed
+three of them: the port now imports the real domain value objects, `FailureReason`
+travels as an enum instead of a `String`, and the inbox keeps a SHA-256 of the raw
+payload rather than the payload — so there is no Stripe body to define a retention
+policy for.
+
+Two things Card 7 leaves open on purpose:
+
+- **`DepositCommandService` does not exist yet** (Card 4). The inbox dispatches
+  through Axon's `CommandGateway` directly, with a `TODO` on the single line that
+  changes when the interface lands. The class diagram already shows the intended
+  delegation.
+- **Exhausted `PARKED` rows and `DISCARDED` rows have no owner.** They log an
+  `error` and stay in the table. No alerting, no reprocessing tool.

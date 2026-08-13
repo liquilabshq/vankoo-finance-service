@@ -96,8 +96,8 @@ package "application.internal.queryservices" {
 
 package "application.internal.outboundservices" {
     interface "PaymentProvider" <<(O, #78909C) Outbound Service>> {
-        + createDeposit(request : CreateProviderDepositRequest) : ProviderDepositCreated
-        + getDeposit(reference : ProviderDepositReference) : ProviderDepositStatus
+        + createDeposit(idempotencyKey : IdempotencyKey, depositId : DepositId, amount : Money, description : String) : ProviderDepositCreated
+        + getDeposit(provider : Provider, providerDepositId : ProviderDepositId) : ProviderDepositStatus
         + verifyWebhook(rawPayload : String, signature : String) : VerifiedProviderDepositUpdate
     }
 
@@ -171,6 +171,13 @@ legend bottom
   deliberate inversion is PaymentProvider: declared in outboundservices and
   implemented in infrastructure.providers.stripe, so the use case can be tested
   against a fake without Stripe.
+
+  <b>PaymentProvider declares no types of its own.</b> Its parameters, its three
+  return types and its sealed error hierarchy all live in domain: the port states
+  what can be asked of a provider, not a vocabulary to ask it in.
+
+  <b>WebhookInboxService dispatches through Axon's CommandGateway for now.</b> The
+  delegation to DepositCommandService drawn here lands with that interface.
 
   DepositProjection and DepositEventPublisher are not called by anyone here: the
   Axon event processor invokes them from the event stream.
