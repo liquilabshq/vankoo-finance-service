@@ -29,6 +29,19 @@ axon:
   serializer:
     general: jackson
 
+vankoo:
+  finance:
+    webhook-inbox:
+      # Cada cuánto barre el inbox. Es también la latencia peor caso de un webhook:
+      # el 200 a Stripe no espera al comando, el comando llega en el siguiente barrido.
+      poll-interval: ${WEBHOOK_INBOX_POLL_INTERVAL:2s}
+      batch-size: ${WEBHOOK_INBOX_BATCH_SIZE:20}
+      # Con el backoff por defecto, 12 intentos cubren algo más de una hora antes de
+      # que la fila deje de reintentarse y quede PARKED esperando a un humano.
+      max-attempts: ${WEBHOOK_INBOX_MAX_ATTEMPTS:12}
+      backoff-base: ${WEBHOOK_INBOX_BACKOFF_BASE:5s}
+      backoff-max: ${WEBHOOK_INBOX_BACKOFF_MAX:10m}
+
 stripe:
   enabled: ${STRIPE_ENABLED:true}
   secret-key: ${STRIPE_SECRET_KEY:}
