@@ -371,22 +371,32 @@ pertenecen a `infrastructure`.
 
 ## Contrato del puerto `PaymentProvider`
 
-El puerto vive en `application` y utiliza modelos propios de Finance:
+El puerto vive en `application` y **habla exclusivamente en tipos de dominio**:
 
 | Operación | Entrada | Salida | Responsabilidad |
 |---|---|---|---|
-| `createDeposit` | `CreateProviderDepositRequest` | `ProviderDepositCreated` | Crear el recurso de cobro externo. |
-| `getDeposit` | `ProviderDepositReference` | `ProviderDepositStatus` | Consultar el estado externo. |
+| `createDeposit` | `IdempotencyKey`, `DepositId`, `Money`, `description` | `ProviderDepositCreated` | Crear el recurso de cobro externo. |
+| `getDeposit` | `Provider`, `ProviderDepositId` | `ProviderDepositStatus` | Consultar el estado externo. |
 | `verifyWebhook` | Payload crudo + firma | `VerifiedProviderDepositUpdate` | Verificar autenticidad y normalizar el evento. |
 
+**`PaymentProvider.java` contiene solo esas tres firmas** (Tarjeta 7). No declara
+records de petición: las entradas viajan como parámetros sueltos, porque agrupar
+`IdempotencyKey` + `DepositId` + `Money` en un `CreateProviderDepositRequest` solo
+añadía un tipo que no significaba nada fuera de esa llamada. Los tres tipos de
+retorno —`ProviderDepositCreated`, `ProviderDepositStatus`,
+`VerifiedProviderDepositUpdate`— sí existen, porque un método tiene que devolver
+algo, y viven en
+`application/internal/outboundservices/paymentprovider/model`.
+
 El puerto no expone tipos de Stripe. La implementación Stripe vive en
-`infrastructure` y traduce los errores del SDK a errores propios de aplicación.
+`infrastructure` y traduce los errores del SDK a la jerarquía de abajo.
 
 ### Errores del puerto
 
-La jerarquía es `sealed` y vive junto al puerto, en `application`. El adaptador
-traduce a estos tipos cualquier error del SDK, de modo que ni `application` ni
-`domain` ven jamás una excepción de Stripe:
+La jerarquía es `sealed` y vive en **`domain/exceptions`**, junto al resto de
+excepciones del bounded context. El adaptador traduce a estos tipos cualquier
+error del SDK, de modo que ni `application` ni `domain` ven jamás una excepción
+de Stripe:
 
 | Error | ¿Reintentable? | Situación |
 |---|---|---|
@@ -394,6 +404,14 @@ traduce a estos tipos cualquier error del SDK, de modo que ni `application` ni
 | `PaymentProviderUnavailableException` | Sí | Proveedor caído o error de servidor. |
 | `PaymentProviderRejectedException` | No | Petición inválida, credenciales o regla del proveedor. |
 | `InvalidWebhookSignatureException` | No | La firma no valida contra el secreto. |
+| `UnsupportedProviderEventException` | No | El evento es auténtico, pero de un tipo que el adaptador no normaliza. |
+
+`UnsupportedProviderEventException` se separó de `PaymentProviderRejectedException`
+en la Tarjeta 7 porque el endpoint de webhooks necesita distinguirlas: un cuerpo
+corrupto es un `400`, mientras que un tipo al que estamos suscritos de más se
+acusa con `200`. Responder con error a lo segundo solo consigue que el proveedor
+reintente indefinidamente un evento que nunca vamos a aplicar; la corrección está
+en la suscripción del dashboard, no en la respuesta HTTP.
 
 Un cobro rechazado **no** es una excepción: es un desenlace de negocio y viaja
 como `FAILED` dentro de `ProviderDepositStatus`. La distinción importa porque un
@@ -435,9 +453,8 @@ silencio. Quien orquesta decide si aparca la operación o la marca para revisió
 
 ### Idempotencia en `createDeposit`
 
-`CreateProviderDepositRequest.idempotencyKey` es obligatorio. La implementación
-Stripe (Tarjeta 6) debe mapearlo al header `Idempotency-Key` de la API de
-Stripe.
+El parámetro `idempotencyKey` de `createDeposit` es obligatorio. La implementación
+Stripe lo mapea al header `Idempotency-Key` de la API de Stripe.
 
 Es una barrera distinta de la de `finance_ops.deposit_command_idempotency`: esa
 evita que el **cliente** cree dos recargas; esta evita que **Finance** cree dos
@@ -465,13 +482,26 @@ comando. Un único componente resuelve tres problemas: deduplicación, llegada
 anticipada y reintentos.
 
 ```text
-finance_ops.provider_webhook_inbox
+finance_ops.provider_webhook_inboxes
   UNIQUE(provider, provider_event_id)     -- deduplicación
-  payload_ref                             -- referencia al payload retenido
+  payload_ref                             -- SHA-256 del payload crudo
   status        RECEIVED | APPLIED | PARKED | DISCARDED
+  normalized_status, failure_reason, cancellation_reason, observed_at
   attempts, next_attempt_at, last_error
   deposit_id                              -- resuelto, si se conoce
 ```
+
+> **Los nombres de tabla van en plural** (`provider_webhook_inboxes`,
+> `deposit_provider_references`). La prosa de este contrato los nombra en
+> singular, pero la naming strategy del proyecto pluraliza el nombre derivado de
+> la `@Entity` y `ddl-auto=validate` compara contra eso. La migración `V2` sigue
+> lo que Hibernate genera, igual que hizo `V1` con las tablas de Axon.
+
+**`payload_ref` es un hash, no una referencia a un payload guardado** (decidido en
+la Tarjeta 7). No retenemos el cuerpo crudo: los campos normalizados de la fila son
+todo lo que un reintento necesita, y el hash basta para correlacionar la fila con
+una entrega concreta en el dashboard de Stripe. Con eso desaparece la pregunta de
+retención abierta en «Decisiones pendientes»: no hay nada del proveedor que purgar.
 
 Flujo:
 
@@ -504,6 +534,44 @@ El flujo completo, con sus ramas de firma inválida, duplicado, llegada
 anticipada y estado terminal, está en
 [`uml/finance-webhook-sequence-diagram.puml`](../uml/finance-webhook-sequence-diagram.puml).
 
+### Cómo quedó implementado (Tarjeta 7)
+
+| Pieza | Clase |
+|---|---|
+| Endpoint | `interfaces/rest/webhooks/StripeWebhookController` |
+| Verificación de firma | `infrastructure/providers/stripe/StripePaymentProvider.verifyWebhook` |
+| Inbox | `application/internal/commandservices/WebhookInboxService` |
+| Escritura de referencias | `application/internal/commandservices/DepositProviderReferenceRegistrar` |
+| Tablas | `infrastructure/persistence/jpa/{entities,repositories}` + `V2__finance_ops_webhook_inbox.sql` |
+
+Tres detalles del diseño que el código hace explícitos:
+
+- **La deduplicación es una sola sentencia.** `INSERT ... ON CONFLICT (provider,
+  provider_event_id) DO NOTHING` devuelve 0 filas cuando el evento ya se había
+  visto. Un `exists()` seguido de un `insert` dejaría una ventana en la que dos
+  entregas simultáneas del mismo evento insertan las dos.
+- **El barrido usa `FOR UPDATE SKIP LOCKED`**, así que puede correr en más de una
+  instancia sin elección de líder: una fila que otro nodo ya está trabajando se
+  salta, no se espera.
+- **Una fila que agota sus intentos deja de ser elegible por `attempts`, pero se
+  queda en `PARKED`.** Nunca pasa a `DISCARDED`: un webhook que no pudimos
+  resolver no es un webhook que podamos tirar. `DISCARDED` queda reservado para
+  lo que el agregado rechaza de forma definitiva (estado terminal o referencia
+  que no coincide).
+
+**Desviación temporal del diagrama de clases:** el diagrama muestra
+`WebhookInboxService → DepositCommandService`, pero esa interfaz llega con la
+Tarjeta 4. Mientras tanto el inbox despacha por el `CommandGateway` de Axon, con
+un `TODO` que marca la única línea a cambiar.
+
+**Clasificación de fallos al despachar.** El inbox distingue definitivo de
+transitorio recorriendo la cadena de causas en busca de
+`TerminalStateTransitionException` o `ProviderReferenceMismatchException`. Como
+los comandos viajan por Axon Server, el tipo original puede llegar envuelto; en
+ese caso la fila se aparca en vez de descartarse. Reintentar algo sin remedio
+cuesta unos intentos y termina delante de un humano, mientras que descartar algo
+reintentable pierde en silencio una actualización de recarga.
+
 ### Idempotencia de comandos de cliente
 
 ```text
@@ -519,9 +587,22 @@ finance_ops.deposit_command_idempotency
 ### Resolución de referencias del proveedor
 
 ```text
-finance_ops.deposit_provider_reference
+finance_ops.deposit_provider_references
   UNIQUE(provider, provider_deposit_id) -> deposit_id
 ```
+
+La escribe `DepositProviderReferenceRegistrar`, un `@EventHandler` sobre
+`DepositProviderReferenceRegisteredEvent` con
+`@ProcessingGroup("deposit-provider-reference")`. Vive en `commandservices` y no
+en `queryservices` a propósito: `queryservices` es el Query Model de
+`deposit_view`, y esta tabla no es read model —participa en una decisión de
+admisión, que es justo lo que el ADR-0001 prohíbe hacer contra una proyección.
+Tampoco es `interfaces/messaging/eventhandlers`, reservado para eventos de otros
+bounded contexts.
+
+Este handler y el callback del proveedor son dos escritores sin orden entre
+ellos: si pierde, el inbox aparca y reintenta hasta que la fila existe. Es la otra
+mitad de la barrera de orden de llegada.
 
 > **Estas tres tablas viven en el schema `finance_ops`, no en
 > `finance_read_model`.** No son proyecciones de consulta: son infraestructura
@@ -909,28 +990,59 @@ viven en `domain/exceptions/`, hermano de `domain/model/`, no anidadas dentro
 de él. Sigue la convención que ya usa `uflex` (otro proyecto de LiquiLabs)
 para su bounded context `subscription`.
 
-**Solo las excepciones que usa `Deposit` directamente están acá.** La
-jerarquía sellada del puerto de pagos (`PaymentProviderException` y sus hijas)
-**no** se movió — sigue siendo responsabilidad exclusiva de quien mantiene el
-puerto (ver más abajo), y esta tarjeta no la toca.
+~~**Solo las excepciones que usa `Deposit` directamente están acá.**~~ Dejó de
+ser cierto en la **Tarjeta 7**: la jerarquía sellada del puerto de pagos
+(`PaymentProviderException` y sus cinco hijas, más la interfaz marcadora
+`RetryablePaymentProviderException`) también vive en `domain/exceptions`.
 
-### El puerto `PaymentProvider` sigue provisional — no es responsabilidad de esta tarjeta resolverlo
+El paquete contiene por tanto dos familias, y conviene no confundirlas:
 
-La Tarjeta 5 dejó el puerto `PaymentProvider` con sus tipos anidados
-temporalmente dentro de `StripePaymentProperties`, marcados explícitamente
-como `PROVISIONAL` a la espera de que existiera `domain/`. La Tarjeta 3 crea
-`domain/` pero **deliberadamente no toca esa capa**: `PaymentProvider.java`,
-`StripePaymentProvider.java` y `StripePaymentProperties.java` quedan tal como
-los dejó Anjali, sin modificar.
+| Familia | Quién la lanza | Qué produce |
+|---|---|---|
+| `InvalidDepositAmountException`, `UnsupportedCurrencyException`, `ProviderReferenceMismatchException`, `TerminalStateTransitionException` | el agregado | rechaza el comando; ningún evento |
+| `PaymentProviderException` y sus hijas | el adaptador de Stripe | nada de dominio; quien orquesta decide si reintenta |
 
-Motivo: esas clases son mantenidas por quien construyó el adaptador de
-Stripe, y son ella quien decide cuándo y cómo adaptarlas ahora que `domain`
-existe — no corresponde que esta tarjeta le imponga una forma. Los tipos que
-la Tarjeta 3 sí deja listos en `domain/model/valueobjects` para que ella los
-use cuando haga esa adaptación: `IdempotencyKey`, `ProviderDepositId`,
-`ProviderEventId`, `NormalizedDepositStatus` (reubicados, antes vivían en el
-puerto) y `FailureReason` (nuevo). Ver "Decisiones pendientes" para el detalle
-de qué queda resuelto y qué sigue abierto.
+Que la segunda familia esté en `domain` es la contrapartida de que el puerto no
+declare tipos propios: `Deposit` no las lanza ni las captura, y `domain` sigue sin
+depender de nada de `infrastructure`.
+
+### El puerto `PaymentProvider` no tiene tipos propios
+
+Resuelto en la Tarjeta 7. La Tarjeta 5 había dejado los tipos del puerto
+anidados dentro de `StripePaymentProperties`, marcados `PROVISIONAL`, porque
+`domain/` no existía todavía; la Tarjeta 3 creó `domain/` pero dejó esa capa
+intacta a propósito, por ser de quien construyó el adaptador. Esta tarjeta cierra
+el círculo: el bloque provisional desaparece y `StripePaymentProperties` vuelve a
+ser solo configuración.
+
+**El puerto queda reducido a sus tres firmas.** Lo que necesitan para expresarse
+se reparte así:
+
+| Qué | Dónde | Por qué ahí |
+|---|---|---|
+| `ProviderDepositCreated`, `ProviderDepositStatus`, `VerifiedProviderDepositUpdate` | `application/.../paymentprovider/model` | Solo existen por el puerto |
+| `PaymentProviderException` y sus cinco hijas | `domain/exceptions` | Junto al resto de excepciones del contexto |
+
+El criterio que separa una cosa de otra es **quién referencia el tipo**.
+`ProviderDepositId`, `ProviderEventId`, `NormalizedDepositStatus` y
+`FailureReason` viven en `domain/model/valueobjects` porque los referencian
+`RegisterDepositProviderReferenceCommand` y `ApplyProviderDepositUpdateCommand`:
+son vocabulario que el agregado necesita. Los tres records de retorno no los usa
+nada de `domain` —`Deposit` no los ve nunca— así que son vocabulario de
+integración y viven junto al puerto.
+
+Se probó a ponerlos en `domain/model/valueobjects` durante la Tarjeta 7 y se
+descartó por eso mismo: son value objects por forma, no por significado. Si
+mañana desapareciera el puerto, `Money` y `DepositId` sobreviven;
+`ProviderDepositCreated` no.
+
+**Ninguno de ellos duplica el dominio**: los tres importan los VOs que agrupan.
+La duplicación real era el bloque `PROVISIONAL` de `StripePaymentProperties`, que
+tenía copias propias de `ProviderDepositId`, `NormalizedDepositStatus` e
+`IdempotencyKey` —dos definiciones del mismo concepto— y esa está borrada.
+
+Consecuencia a tener presente: `domain/exceptions` ya no contiene solo lo que
+lanza el agregado. Ver más abajo.
 
 ### No hay módulo `shareddomain`
 
@@ -986,28 +1098,24 @@ negocio.
 ## Decisiones pendientes
 
 - ~~Tipos provisionales del puerto `PaymentProvider` (Tarjeta 5, pendiente de
-  revisión de Salim)~~ → **resuelto en la Tarjeta 3, mitad hecho por diseño.**
-  `ProviderDepositId`, `ProviderEventId`, `IdempotencyKey` y
-  `NormalizedDepositStatus` ya viven en `domain/model/valueobjects` — los
-  comandos `RegisterDepositProviderReferenceCommand` y
-  `ApplyProviderDepositUpdateCommand` los referencian directamente ahí. **Lo
-  que sigue pendiente:** el puerto `PaymentProvider` y su adaptador
-  (`StripePaymentProvider`, con sus tipos hoy anidados en
-  `StripePaymentProperties`) todavía no importan estos tipos de `domain` —
-  siguen con sus copias provisionales, sin tocar, porque esa capa es
-  responsabilidad de quien construyó el adaptador. Adaptarla es trabajo suyo,
-  no de esta tarjeta.
+  revisión de Salim)~~ → **resuelto del todo en la Tarjeta 7.** El bloque
+  `PROVISIONAL` de `StripePaymentProperties` está borrado; `PaymentProvider` y
+  `StripePaymentProvider` importan `ProviderDepositId`, `ProviderEventId`,
+  `IdempotencyKey`, `NormalizedDepositStatus`, `FailureReason`, `Provider`,
+  `Money` y `DepositId` desde `domain/model/valueobjects`. Ninguna lógica de
+  Stripe cambió al hacerlo: solo imports y bordes.
 - ~~Confirmar con Anjali la taxonomía de estados que cada proveedor puede
   normalizar~~ → **resuelto** en la Tarjeta 5: `NormalizedDepositStatus` define
   `ACTION_REQUIRED`, `PROCESSING`, `SUCCEEDED`, `FAILED` y `CANCELLED`, que
   coinciden con la tabla de mapeo de abajo. Excluye `PENDING` a propósito: es el
   estado inicial que el agregado se da a sí mismo, nunca una observación externa.
-- **`FailureReason` ya existe en `domain/model/valueobjects`** (Tarjeta 3), con
-  los cinco valores que este contrato define. **Pero el puerto todavía no lo
-  usa:** `failureReason` sigue viajando como `String` libre dentro del bloque
-  provisional de `StripePaymentProperties`, sin cambiar — el enum queda listo
-  para que se use cuando se adapte esa capa, pero montar el mapeo ahí es parte
-  de esa adaptación pendiente, no de esta tarjeta.
+- ~~**`FailureReason` ya existe pero el puerto todavía no lo usa**~~ →
+  **resuelto en la Tarjeta 7.** `VerifiedProviderDepositUpdate` y
+  `ProviderDepositStatus` llevan `FailureReason`, no `String`. Sigue siendo
+  `UNKNOWN` para un pago asíncrono fallido: la Checkout Session no expone una
+  razón normalizada, y sacarla del `PaymentIntent` es reconciliación, que no está
+  en la v1. `cancellationReason` sí sigue siendo texto libre, igual que en
+  `ApplyProviderDepositUpdateCommand`.
 - **Diseño de `Wallet` con dos monedas:** un monedero por moneda o uno con un
   saldo por moneda, y si una recarga en USD puede financiar una factura en PEN.
 - Confirmar con Anjali que Stripe puede liquidar tanto `PEN` como `USD` para la
@@ -1015,7 +1123,11 @@ negocio.
 - Definir los límites de tamaño para descripción e identificadores externos.
 - Definir el formato de errores HTTP común de Vankoo.
 - Definir la política de retención y el dead-letter de Kafka.
-- Definir la política de retención del payload crudo en el inbox de webhooks.
+- ~~Definir la política de retención del payload crudo en el inbox de webhooks.~~
+  → **resuelto en la Tarjeta 7: no se retiene.** `payload_ref` guarda el SHA-256
+  del cuerpo, no el cuerpo. Queda abierto, en cambio, **qué hacer con las filas
+  `PARKED` agotadas y las `DISCARDED`**: hoy se quedan ahí y disparan un `error`
+  en el log, sin alerta ni herramienta de reproceso.
 - **Revisar en la Tarjeta 4 si `DepositSummary` se justifica**, o si conviene
   mover `DepositQueryService` fuera del dominio y quedarse en dos tipos.
 - **Diseñar el contrato del agregado `Wallet`/`Ledger`**, segundo agregado de
