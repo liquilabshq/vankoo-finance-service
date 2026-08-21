@@ -752,6 +752,30 @@ tabla sin excepción, igual que ya le pasó a las tablas de `finance_ops`):
 La proyección debe poder eliminarse y reconstruirse por completo reproduciendo
 el historial de eventos.
 
+### Cómo reconstruir la proyección
+
+No basta con vaciar `deposit_views`. El *tracking token* del processing group
+`deposit-read-model` vive aparte, en `public.token_entries` (la tabla de Axon),
+y le dice al processor hasta dónde ya leyó el stream de eventos — si la tabla
+queda vacía pero el token sigue apuntando al final, Axon entiende que ya
+procesó todo y **no vuelve a leer nada**: la proyección se queda vacía para
+siempre, no se reconstruye.
+
+Procedimiento manual (no hay endpoint ni script todavía — ver
+"Endurecimiento y documentación" para exponer esto de forma operable):
+
+1. Parar la aplicación.
+2. Vaciar `finance_read_model.deposit_views` (`TRUNCATE` o `DROP`+recrear vía
+   migración, según qué cambió).
+3. Borrar la fila de `public.token_entries` donde
+   `processor_name = 'deposit-read-model'` — esto es lo que realmente dispara
+   el replay, no el paso 2.
+4. Reiniciar la aplicación. `DepositProjection` vuelve a recibir, en orden,
+   todos los eventos de `Deposit` desde Axon Server y repuebla la tabla.
+
+Los otros processing groups (`deposit-provider-reference`, y los del inbox de
+webhooks) tienen su propio token — resetear `deposit-read-model` no los toca.
+
 ### Consultas lógicas iniciales
 
 - `GetDepositById(depositId)`
@@ -760,6 +784,23 @@ el historial de eventos.
 Las consultas no reconstruyen el agregado desde el Event Store. Leen el Read
 Model y aceptan consistencia eventual después de un comando o una proyección
 reprocesada.
+
+### Sin caché en v1
+
+**No hay Redis (ni ningún otro caché) delante de `deposit_views` en la v1.**
+Se decide explícitamente para que no quede como un silencio del contrato,
+mismo criterio que con los snapshots.
+
+Las dos consultas actuales son justo lo que un índice de Postgres resuelve
+bien: `GetDepositById` es un lookup por `UNIQUE(deposit_id)`, y
+`ListDepositsByAccount` corre sobre `idx_deposit_views_account_created`. No
+hay carga medida que un caché mejore, y sí hay un costo concreto de meterlo
+ahora: un componente más para operar, y el problema de consistencia de quién
+escribe primero y qué pasa si uno de los dos falla.
+
+Se reevalúa si aparece un patrón de lectura de alta frecuencia y baja
+tolerancia a latencia que Postgres no pueda sostener — mismo umbral que se
+usa para reevaluar snapshots en agregados de vida larga.
 
 ### Los tres tipos del lado de lectura
 
