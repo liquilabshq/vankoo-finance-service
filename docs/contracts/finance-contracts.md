@@ -726,7 +726,10 @@ Payload:
 ## Read Model y consultas
 
 El Read Model de PostgreSQL es una proyección, no una segunda fuente de verdad.
-La primera proyección es `finance_read_model.deposit_view`:
+La primera proyección es `finance_read_model.deposit_views` (nombre en plural:
+la naming strategy del proyecto —
+`SnakeCaseWithPluralizedTablePhysicalNamingStrategy` — pluraliza todo nombre de
+tabla sin excepción, igual que ya le pasó a las tablas de `finance_ops`):
 
 | Campo | Propósito |
 |---|---|
@@ -740,6 +743,7 @@ La primera proyección es `finance_read_model.deposit_view`:
 | `status` | Estado actual de Finance. |
 | `action_url` | URL de acción, si aplica y sigue vigente. |
 | `failure_reason` | Razón normalizada, si la recarga falló. |
+| `cancellation_reason` | Razón de cancelación, texto libre del proveedor, si la recarga fue cancelada. |
 | `created_at` | Fecha de creación. |
 | `updated_at` | Fecha de última proyección. |
 | `last_event_id` | Último evento aplicado, para idempotencia de la proyección. |
@@ -764,7 +768,7 @@ sus nombres se parecen y confundirlos es fácil:
 
 | Tipo | Capa | Qué es | Cambia cuando… |
 |---|---|---|---|
-| `DepositViewEntity` | `infrastructure/persistence/jpa` | la `@Entity` que mapea la tabla `deposit_view`, con `last_event_id` y `projection_version` | cambia el almacén |
+| `DepositViewEntity` | `infrastructure/persistence/jpa` | la `@Entity` que mapea la tabla `deposit_views`, con `last_event_id` y `projection_version` | cambia el almacén |
 | `DepositSummary` | `domain/model/queries` | qué datos pide el negocio, compuesto de value objects | cambia el negocio |
 | `DepositResource` | `interfaces/rest/resources` | el JSON de la respuesta HTTP | cambia el contrato de la API |
 
