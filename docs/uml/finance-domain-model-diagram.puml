@@ -51,10 +51,17 @@ package "Finance Context" {
         }
 
         class "Wallet" <<(A, #27D3F5) Aggregate Root>> {
-            .. contract not designed yet ..
-            Holds the investor balance.
-            Consumes DepositSucceededEvent
-            over the internal Axon event bus.
+            - walletId : WalletId
+            - accountId : AccountId
+            - balance : Money
+            .. commands and events not designed yet ..
+            Opened lazily on the investor's first
+            deposit per currency (temporary — see
+            wallet-contracts.md for the target
+            design, driven by Profile's
+            account-created event via Kafka).
+            Consumes DepositSucceededEvent over
+            the internal Axon event bus.
         }
 
     }
@@ -64,6 +71,13 @@ package "Finance Context" {
             - value : UUID
             + DepositId(value : UUID)
             + {static} newId() : DepositId
+            + getValue() : UUID
+        }
+
+        class "WalletId" <<(V, #FFD700) Value Object>> {
+            - value : UUID
+            + WalletId(value : UUID)
+            + {static} derive(accountId : AccountId, currency : Currency) : WalletId
             + getValue() : UUID
         }
 
@@ -285,9 +299,13 @@ package "Finance Context" {
 
 ' Aggregate composition
 Deposit "1" *-- "1" Money : holds >
+Wallet "1" *-- "1" Money : holds >
 
-' Second aggregate of this bounded context, still undesigned
-Wallet --> AccountId : identified by >
+' Second aggregate of this bounded context — contract drafted in
+' wallet-contracts.md, commands/events not designed yet
+Wallet --> WalletId : identified by >
+WalletId --> AccountId : derived from >
+WalletId --> Currency : derived from >
 Wallet ..> DepositSucceededEvent : consumes >
 
 ' Value object associations
@@ -341,10 +359,16 @@ legend bottom
   <b>No child entities in the v1.</b> Every attribute is a value object.
   domain/model/entities exists and is available when one appears.
 
-  <b>Wallet is shown without members on purpose.</b> It is the second aggregate of this
-  bounded context and its contract is not designed yet, so inventing fields here would
-  read as decided. Only what is already agreed is drawn: it owns AccountId and consumes
-  DepositSucceededEvent over the internal Axon event bus, not over Kafka.
+  <b>Wallet shows only what wallet-contracts.md already decided.</b> Its commands and
+  events are deliberately left undrawn — that detail belongs to the implementation
+  card, not this contract. One Wallet exists per (accountId, currency): WalletId is
+  derived deterministically from both, not a random UUID like DepositId, so no
+  translation table is needed to find a Wallet. It consumes DepositSucceededEvent over
+  the internal Axon event bus, not over Kafka. Today it is opened lazily by that same
+  handler on the investor's first deposit per currency — a temporary measure until
+  Wallet can be opened from Profile's account-created event once Kafka is wired into
+  this service (see wallet-contracts.md for the target design and why it still won't
+  need a saga).
 
   <b>Only the service interfaces live in the domain layer.</b> The implementations live in
   application/internal/{commandservices, queryservices}. Queries are resolved against
