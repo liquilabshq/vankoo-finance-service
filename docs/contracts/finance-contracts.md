@@ -361,7 +361,7 @@ traducir sus estados a la taxonomía de Finance antes de enviar el comando:
 | Cancelado o expirado | `CANCELLED` |
 
 Esta taxonomía está implementada como el enum `NormalizedDepositStatus`, en
-`application/internal/outboundservices/paymentprovider/model`. No incluye
+`domain/model/valueobjects`. No incluye
 `PENDING` porque ese es el estado inicial que el agregado se da a sí mismo al
 aceptar la recarga, y nunca llega desde una observación externa.
 
@@ -385,8 +385,7 @@ records de petición: las entradas viajan como parámetros sueltos, porque agrup
 añadía un tipo que no significaba nada fuera de esa llamada. Los tres tipos de
 retorno —`ProviderDepositCreated`, `ProviderDepositStatus`,
 `VerifiedProviderDepositUpdate`— sí existen, porque un método tiene que devolver
-algo, y viven en
-`application/internal/outboundservices/paymentprovider/model`.
+algo, y viven en `domain/model/valueobjects`.
 
 El puerto no expone tipos de Stripe. La implementación Stripe vive en
 `infrastructure` y traduce los errores del SDK a la jerarquía de abajo.
@@ -540,8 +539,9 @@ anticipada y estado terminal, está en
 |---|---|
 | Endpoint | `interfaces/rest/webhooks/StripeWebhookController` |
 | Verificación de firma | `infrastructure/providers/stripe/StripePaymentProvider.verifyWebhook` |
-| Inbox | `application/internal/commandservices/WebhookInboxService` |
-| Escritura de referencias | `application/internal/commandservices/DepositProviderReferenceRegistrar` |
+| Caso de uso (interfaz) | `domain/services/WebhookInboxService` |
+| Inbox (implementación) | `application/internal/commandservices/WebhookInboxServiceImpl` |
+| Escritura de referencias | `application/internal/eventhandlers/DepositProviderReferenceRegisteredEventHandler` |
 | Tablas | `infrastructure/persistence/jpa/{entities,repositories}` + `V2__finance_ops_webhook_inbox.sql` |
 
 Tres detalles del diseño que el código hace explícitos:
@@ -591,12 +591,13 @@ finance_ops.deposit_provider_references
   UNIQUE(provider, provider_deposit_id) -> deposit_id
 ```
 
-La escribe `DepositProviderReferenceRegistrar`, un `@EventHandler` sobre
-`DepositProviderReferenceRegisteredEvent` con
-`@ProcessingGroup("deposit-provider-reference")`. Vive en `commandservices` y no
-en `queryservices` a propósito: `queryservices` es el Query Model de
-`deposit_view`, y esta tabla no es read model —participa en una decisión de
-admisión, que es justo lo que el ADR-0001 prohíbe hacer contra una proyección.
+La escribe `DepositProviderReferenceRegisteredEventHandler`, un `@EventHandler`
+sobre `DepositProviderReferenceRegisteredEvent` con
+`@ProcessingGroup("deposit-provider-reference")`. Vive en
+`application/internal/eventhandlers`, el paquete de los handlers de eventos
+propios que no son la proyección. No va en `queryservices`: ese es el Query
+Model de `deposit_view`, y esta tabla no es read model —participa en una decisión
+de admisión, que es justo lo que el ADR-0001 prohíbe hacer contra una proyección.
 Tampoco es `interfaces/messaging/eventhandlers`, reservado para eventos de otros
 bounded contexts.
 
@@ -1015,26 +1016,20 @@ intacta a propósito, por ser de quien construyó el adaptador. Esta tarjeta cie
 el círculo: el bloque provisional desaparece y `StripePaymentProperties` vuelve a
 ser solo configuración.
 
-**El puerto queda reducido a sus tres firmas.** Lo que necesitan para expresarse
-se reparte así:
+**El puerto queda reducido a sus tres firmas.** `application` no gana ningún tipo
+nuevo: todo lo que el puerto necesita para expresarse vive en `domain`.
 
-| Qué | Dónde | Por qué ahí |
-|---|---|---|
-| `ProviderDepositCreated`, `ProviderDepositStatus`, `VerifiedProviderDepositUpdate` | `application/.../paymentprovider/model` | Solo existen por el puerto |
-| `PaymentProviderException` y sus cinco hijas | `domain/exceptions` | Junto al resto de excepciones del contexto |
+| Qué | Dónde |
+|---|---|
+| `ProviderDepositCreated`, `ProviderDepositStatus`, `VerifiedProviderDepositUpdate` | `domain/model/valueobjects` |
+| `PaymentProviderException` y sus cinco hijas | `domain/exceptions` |
 
-El criterio que separa una cosa de otra es **quién referencia el tipo**.
-`ProviderDepositId`, `ProviderEventId`, `NormalizedDepositStatus` y
-`FailureReason` viven en `domain/model/valueobjects` porque los referencian
-`RegisterDepositProviderReferenceCommand` y `ApplyProviderDepositUpdateCommand`:
-son vocabulario que el agregado necesita. Los tres records de retorno no los usa
-nada de `domain` —`Deposit` no los ve nunca— así que son vocabulario de
-integración y viven junto al puerto.
-
-Se probó a ponerlos en `domain/model/valueobjects` durante la Tarjeta 7 y se
-descartó por eso mismo: son value objects por forma, no por significado. Si
-mañana desapareciera el puerto, `Money` y `DepositId` sobreviven;
-`ProviderDepositCreated` no.
+Durante la Tarjeta 7 estos tres records se movieron un momento a un subpaquete
+`paymentprovider/model` en `application`, razonando que solo existen por el puerto
+y que ningún elemento del dominio los usa. Se revirtió: la razón de ser del puerto
+es precisamente que habla el vocabulario del dominio, así que darle uno paralelo
+anula la inversión para la que existe. Queda anotado para que el viaje de ida y
+vuelta no se repita.
 
 **Ninguno de ellos duplica el dominio**: los tres importan los VOs que agrupan.
 La duplicación real era el bloque `PROVISIONAL` de `StripePaymentProperties`, que

@@ -54,6 +54,11 @@ package "domain.services" {
         + handle(query : GetDepositByIdQuery) : DepositSummary
         + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
     }
+
+    interface "WebhookInboxService" <<(S, #FF8A65) Domain Service>> {
+        + accept(update : VerifiedProviderDepositUpdate, payloadRef : String) : InboxAdmission
+        + resolveAndApply() : void
+    }
 }
 
 package "domain.model.aggregates" {
@@ -72,11 +77,19 @@ package "application.internal.commandservices" {
         + handle(command : ApplyProviderDepositUpdateCommand) : void
     }
 
-    class "WebhookInboxService" <<(V, #FFA726) Service>> {
-        - inboxRepository : WebhookInboxRepository
-        - paymentProvider : PaymentProvider
-        + accept(update : VerifiedProviderDepositUpdate) : void
+    class "WebhookInboxServiceImpl" <<(V, #FFA726) Service>> {
+        - inboxRepository : ProviderWebhookInboxRepository
+        - referenceRepository : DepositProviderReferenceRepository
+        - commandGateway : CommandGateway
+        + accept(update : VerifiedProviderDepositUpdate, payloadRef : String) : InboxAdmission
         + resolveAndApply() : void
+    }
+}
+
+package "application.internal.eventhandlers" {
+    class "DepositProviderReferenceRegisteredEventHandler" <<(V, #FFA726) Service>> {
+        - referenceRepository : DepositProviderReferenceRepository
+        + on(event : DepositProviderReferenceRegisteredEvent) : void
     }
 }
 
@@ -112,11 +125,14 @@ package "infrastructure.persistence.jpa.repositories" {
         + findByAccountId(accountId : UUID, page : Pageable) : List<DepositViewEntity>
     }
 
-    interface "WebhookInboxRepository" <<(R, #90A4AE) Repository>> {
-        + insertIfAbsent(provider : String, providerEventId : String) : boolean
-        + resolveDepositId(provider : String, providerDepositId : String) : UUID
-        + markApplied(id : UUID) : void
-        + park(id : UUID, nextAttemptAt : Instant) : void
+    interface "ProviderWebhookInboxRepository" <<(R, #90A4AE) Repository>> {
+        + insertIfAbsent(...) : int
+        + claimDue(now : Instant, maxAttempts : int, batchSize : int) : List<ProviderWebhookInbox>
+    }
+
+    interface "DepositProviderReferenceRepository" <<(R, #90A4AE) Repository>> {
+        + findByProviderAndProviderDepositId(provider : Provider, providerDepositId : ProviderDepositId) : Optional
+        + insertIfAbsent(...) : int
     }
 
     interface "DepositIdempotencyRepository" <<(R, #90A4AE) Repository>> {
@@ -132,10 +148,13 @@ DepositCommandServiceImpl ..> Deposit : dispatches to >
 DepositCommandServiceImpl ..> PaymentProvider : creates external charge >
 DepositCommandServiceImpl ..> DepositIdempotencyRepository : checks Idempotency-Key >
 
-WebhookInboxService ..> PaymentProvider : verifies signature >
-WebhookInboxService ..> WebhookInboxRepository : deduplicates and parks >
-WebhookInboxService ..> ApplyProviderDepositUpdateCommand : builds >
-WebhookInboxService ..> DepositCommandService : delegates >
+WebhookInboxServiceImpl ..|> WebhookInboxService : implements >
+WebhookInboxServiceImpl ..> ProviderWebhookInboxRepository : deduplicates and parks >
+WebhookInboxServiceImpl ..> DepositProviderReferenceRepository : resolves depositId >
+WebhookInboxServiceImpl ..> ApplyProviderDepositUpdateCommand : builds >
+WebhookInboxServiceImpl ..> DepositCommandService : delegates >
+
+DepositProviderReferenceRegisteredEventHandler ..> DepositProviderReferenceRepository : writes >
 
 Deposit ..> RegisterDepositProviderReferenceCommand : handles >
 
@@ -162,7 +181,7 @@ note bottom of DepositQueryServiceImpl
 end note
 
 legend bottom
-  <b>Both interfaces are declared in domain.services and implemented here.</b>
+  <b>Every use case is declared in domain.services and implemented here.</b>
   The domain states what the use cases are; the application layer wires them to
   Axon, to the provider and to the repositories.
 
@@ -176,8 +195,13 @@ legend bottom
   return types and its sealed error hierarchy all live in domain: the port states
   what can be asked of a provider, not a vocabulary to ask it in.
 
-  <b>WebhookInboxService dispatches through Axon's CommandGateway for now.</b> The
-  delegation to DepositCommandService drawn here lands with that interface.
+  <b>WebhookInboxServiceImpl dispatches through Axon's CommandGateway for now.</b>
+  The delegation to DepositCommandService drawn here lands with that interface.
+
+  <b>application.internal.eventhandlers is for handlers of OUR OWN events that are
+  not the read model projection.</b> DepositProviderReferenceRegisteredEventHandler
+  writes finance_ops, which takes part in an admission decision and therefore
+  cannot be a projection.
 
   DepositProjection and DepositEventPublisher are not called by anyone here: the
   Axon event processor invokes them from the event stream.

@@ -49,7 +49,9 @@ com.liquilabs.vankoo.finance
 ├── interfaces/
 │   ├── rest/{controllers, webhooks, resources, transform}
 │   └── messaging/eventhandlers      # events from OTHER bounded contexts (empty in v1)
-├── application/internal/{commandservices, queryservices, outboundservices}
+├── application/internal/{commandservices, queryservices, outboundservices,
+│                          eventhandlers}   # handlers of OUR OWN events that are
+│                                            # not the read model projection
 ├── domain/
 │   ├── model/{aggregates, entities, commands, queries, events, valueobjects}
 │   ├── exceptions/                  # what the aggregate throws
@@ -74,15 +76,19 @@ com.liquilabs.vankoo.finance
 - **There is no repository for the aggregate.** `Deposit` is event-sourced; it is
   rehydrated by replay, never loaded from a table. There is no `deposit.save()`.
 
-### Three event-handler roles, three different homes
+### Four event-handler roles, four different homes
 
-The guide classifies by direction, not by who authored the event:
+The guide classifies by direction, not by who authored the event. The fourth row
+is not in the guide: it is the slot for a handler of our own events that is not
+the read model projection, which the guide never needed because it has no
+operational tables.
 
 | Role | Listens to | Package |
 |---|---|---|
 | Integration handler | events from **other** bounded contexts | `interfaces/messaging/eventhandlers` |
-| Projection + query handlers | **our own** events | `application/internal/queryservices` |
+| Projection + query handlers | **our own** events, writing the read model | `application/internal/queryservices` |
 | Integration publisher | **our own** events | `application/internal/outboundservices` |
+| Anything else reacting to **our own** events | e.g. writing a `finance_ops` table | `application/internal/eventhandlers` |
 
 Infrastructure only holds the technology contact surface: the JPA repository and
 the broker channel binding. **The handlers themselves live in `application`.**
@@ -116,17 +122,11 @@ repeated in the Stripe adapter, because `Money` deliberately does not enforce it
 
 **`PaymentProvider.java` is three method signatures and nothing else.** Inputs
 travel as loose parameters — there is no `CreateProviderDepositRequest`. The three
-return types live in `outboundservices/paymentprovider/model`, the errors in
-`domain/exceptions`.
-
-**What decides whether a provider-facing type belongs in `domain`: who
-references it.** `ProviderDepositId`, `ProviderEventId`,
-`NormalizedDepositStatus` and `FailureReason` are in `domain/model/valueobjects`
-because the two commands reference them. The port's three return types are
-referenced by nothing in `domain` — `Deposit` never sees one — so they are
-integration vocabulary and live with the port. They were briefly moved into
-`valueobjects` during Card 7 and moved back for exactly this reason; they are
-value objects by shape, not by meaning.
+return types live in `domain/model/valueobjects`, the errors in
+`domain/exceptions`. **`application` declares no types of its own**; do not add a
+`model/` subpackage under `outboundservices`. Card 7 tried it and reverted: the
+port's whole point is that it speaks the domain's vocabulary, so giving it a
+parallel one defeats the inversion it exists for.
 
 **`domain/exceptions` holds two families**, and they are not the same thing: what
 the aggregate throws (`InvalidDepositAmountException`, …), and the `sealed`
