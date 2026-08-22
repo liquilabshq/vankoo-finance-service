@@ -1,12 +1,12 @@
 package com.liquilabs.vankoo.finance.interfaces.rest.webhooks;
 
-import com.liquilabs.vankoo.finance.application.internal.commandservices.WebhookInboxService;
-import com.liquilabs.vankoo.finance.application.internal.commandservices.WebhookInboxService.InboxAdmission;
 import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.PaymentProvider;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidWebhookSignatureException;
 import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderRejectedException;
 import com.liquilabs.vankoo.finance.domain.exceptions.UnsupportedProviderEventException;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.VerifiedProviderDepositUpdate;
+import com.liquilabs.vankoo.finance.domain.services.WebhookInboxService;
+import com.liquilabs.vankoo.finance.domain.services.WebhookInboxService.InboxAdmission;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;

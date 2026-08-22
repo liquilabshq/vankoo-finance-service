@@ -1,8 +1,5 @@
 package com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider;
 
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositCreated;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositStatus;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidWebhookSignatureException;
 import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderException;
 import com.liquilabs.vankoo.finance.domain.exceptions.RetryablePaymentProviderException;
@@ -11,7 +8,10 @@ import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.IdempotencyKey;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Money;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Provider;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositCreated;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositStatus;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.VerifiedProviderDepositUpdate;
 
 /**
  * Outbound port towards payment providers.

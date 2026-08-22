@@ -1,7 +1,4 @@
-package com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model;
-
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.NormalizedDepositStatus;
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
+package com.liquilabs.vankoo.finance.domain.model.valueobjects;
 
 /**
  * What the provider answered when the charge resource was created.

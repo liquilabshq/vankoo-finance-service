@@ -1,9 +1,6 @@
 package com.liquilabs.vankoo.finance.infrastructure.providers.stripe;
 
 import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.PaymentProvider;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositCreated;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.ProviderDepositStatus;
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidWebhookSignatureException;
 import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderException;
 import com.liquilabs.vankoo.finance.domain.exceptions.PaymentProviderRejectedException;
@@ -16,8 +13,11 @@ import com.liquilabs.vankoo.finance.domain.model.valueobjects.IdempotencyKey;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Money;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.NormalizedDepositStatus;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Provider;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositCreated;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositStatus;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderEventId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.VerifiedProviderDepositUpdate;
 import com.liquilabs.vankoo.finance.infrastructure.providers.stripe.configuration.StripePaymentProperties;
 import com.stripe.Stripe;
 import com.stripe.exception.ApiConnectionException;

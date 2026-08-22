@@ -35,6 +35,7 @@ package vankoo-finance-service as vankoo_finance_service {
             package commandservices {}
             package queryservices {}
             package outboundservices {}
+            package eventhandlers {}
         }
         package interfaces {
             package rest {
@@ -82,7 +83,9 @@ axon ..> aggregates
 kafka ..> events
 configuration ..> axon
 configuration ..> repositories
-eventhandlers ..> commandservices
+vankoo_finance_service.finance.interfaces.messaging.eventhandlers ..> commandservices
+vankoo_finance_service.finance.application.internal.eventhandlers ..> events
+vankoo_finance_service.finance.application.internal.eventhandlers ..> repositories
 vankoo_finance_service.finance.infrastructure.providers.stripe ..> outboundservices
 vankoo_finance_service.finance.infrastructure.providers.stripe ..> valueobjects
 vankoo_finance_service.finance.infrastructure.providers.stripe ..> com.stripe.model

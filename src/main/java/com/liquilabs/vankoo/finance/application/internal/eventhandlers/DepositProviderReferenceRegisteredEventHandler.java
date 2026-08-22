@@ -1,4 +1,4 @@
-package com.liquilabs.vankoo.finance.application.internal.commandservices;
+package com.liquilabs.vankoo.finance.application.internal.eventhandlers;
 
 import com.liquilabs.vankoo.finance.domain.model.events.DepositProviderReferenceRegisteredEvent;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.repositories.DepositProviderReferenceRepository;
@@ -22,24 +22,23 @@ import java.util.UUID;
  * provider's callback are two writers with no ordering between them. Whichever
  * loses, the inbox parks and retries until this row exists.
  *
- * <p><strong>Why it sits in {@code commandservices} and not in
- * {@code queryservices}:</strong> that package is the Query Model — the
- * projection and query handlers of {@code deposit_view}. This table is not read
- * model. It takes part in an admission decision, which ADR-0001 forbids doing
- * against a projection, and it lives in {@code finance_ops} for exactly that
- * reason. It is not {@code interfaces/messaging/eventhandlers} either: that is
- * for events from <em>other</em> bounded contexts. So it goes next to the
- * component it serves.
+ * <p><strong>Why it sits in {@code application/internal/eventhandlers}:</strong>
+ * it reacts to one of our own events and writes neither the read model nor an
+ * outbound message. It is not {@code queryservices} — that package is the Query
+ * Model, and this table is not read model: it takes part in an admission
+ * decision, which ADR-0001 forbids doing against a projection. Nor is it
+ * {@code interfaces/messaging/eventhandlers}, which is for events from
+ * <em>other</em> bounded contexts.
  */
 @Component
 @ProcessingGroup("deposit-provider-reference")
-public class DepositProviderReferenceRegistrar {
+public class DepositProviderReferenceRegisteredEventHandler {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(DepositProviderReferenceRegistrar.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(DepositProviderReferenceRegisteredEventHandler.class);
 
     private final DepositProviderReferenceRepository referenceRepository;
 
-    public DepositProviderReferenceRegistrar(DepositProviderReferenceRepository referenceRepository) {
+    public DepositProviderReferenceRegisteredEventHandler(DepositProviderReferenceRepository referenceRepository) {
         this.referenceRepository = referenceRepository;
     }
 
