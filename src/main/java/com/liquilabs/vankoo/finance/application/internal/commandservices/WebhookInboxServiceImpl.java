@@ -1,10 +1,11 @@
 package com.liquilabs.vankoo.finance.application.internal.commandservices;
 
-import com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model.VerifiedProviderDepositUpdate;
 import com.liquilabs.vankoo.finance.domain.exceptions.ProviderReferenceMismatchException;
 import com.liquilabs.vankoo.finance.domain.exceptions.TerminalStateTransitionException;
 import com.liquilabs.vankoo.finance.domain.model.commands.ApplyProviderDepositUpdateCommand;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.VerifiedProviderDepositUpdate;
+import com.liquilabs.vankoo.finance.domain.services.WebhookInboxService;
 import com.liquilabs.vankoo.finance.infrastructure.configuration.WebhookInboxProperties;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.entities.DepositProviderReference;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.entities.ProviderWebhookInbox;
@@ -24,40 +25,33 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The webhook inbox: one component for the three problems an external event
- * brings — duplicates, arrival order and retries.
- *
- * <p>It is split in two halves that never run together:
+ * The webhook inbox, backed by {@code finance_ops.provider_webhook_inboxes}.
+ * The contract is in {@link WebhookInboxService}; what this class adds is how
+ * each of its guarantees is obtained:
  *
  * <ul>
- *   <li>{@link #accept} is synchronous, and it is the <em>only</em> thing that
- *       happens before the provider is acknowledged. It records the event and
- *       returns. It does not resolve, does not dispatch and does not wait.</li>
- *   <li>{@link #resolveAndApply} runs on a sweep, resolves the deposit and
- *       turns the row into a command.</li>
+ *   <li><b>Deduplication</b> is one conflict-tolerant {@code INSERT} against the
+ *       unique index. Not an {@code exists()} followed by an {@code insert},
+ *       which leaves a window for two simultaneous deliveries.</li>
+ *   <li><b>Arrival order</b> is handled by parking with exponential backoff, and
+ *       the sweep claims rows with {@code FOR UPDATE SKIP LOCKED} so it stays
+ *       safe on more than one node without a leader election.</li>
+ *   <li><b>Correctness</b> is not this class's job at all: the aggregate's
+ *       terminal states make a repeated command produce no event, which is why
+ *       a re-send after a crash is harmless.</li>
  * </ul>
- *
- * <p>The split is the point. Stripe retries a delivery it considers slow, so
- * acknowledging only after the command would manufacture the very duplicates
- * the inbox exists to absorb.
  */
 @Service
-public class WebhookInboxService {
+public class WebhookInboxServiceImpl implements WebhookInboxService {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(WebhookInboxService.class);
-
-    /** Outcome of admitting an event. There is no rejection: a verified event is always recorded, or already was. */
-    public enum InboxAdmission {
-        ACCEPTED,
-        DUPLICATE
-    }
+    private static final Logger LOGGER = LoggerFactory.getLogger(WebhookInboxServiceImpl.class);
 
     private final ProviderWebhookInboxRepository inboxRepository;
     private final DepositProviderReferenceRepository referenceRepository;
     private final CommandGateway commandGateway;
     private final WebhookInboxProperties properties;
 
-    public WebhookInboxService(ProviderWebhookInboxRepository inboxRepository,
+    public WebhookInboxServiceImpl(ProviderWebhookInboxRepository inboxRepository,
                                DepositProviderReferenceRepository referenceRepository,
                                CommandGateway commandGateway,
                                WebhookInboxProperties properties) {
@@ -78,6 +72,7 @@ public class WebhookInboxService {
      * @param payloadRef digest of the raw payload — the body itself is never
      *                   stored, and never reaches this layer
      */
+    @Override
     @Transactional
     public InboxAdmission accept(VerifiedProviderDepositUpdate update, String payloadRef) {
         int inserted = inboxRepository.insertIfAbsent(
@@ -108,6 +103,7 @@ public class WebhookInboxService {
      * row due again: the command is then re-sent, which is harmless because the
      * aggregate's terminal states make a repeat produce no event.
      */
+    @Override
     @Scheduled(fixedDelayString = "${vankoo.finance.webhook-inbox.poll-interval:2s}")
     @Transactional
     public void resolveAndApply() {

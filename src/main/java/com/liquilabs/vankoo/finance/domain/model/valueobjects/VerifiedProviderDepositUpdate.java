@@ -1,10 +1,4 @@
-package com.liquilabs.vankoo.finance.application.internal.outboundservices.paymentprovider.model;
-
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.FailureReason;
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.NormalizedDepositStatus;
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.Provider;
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderDepositId;
-import com.liquilabs.vankoo.finance.domain.model.valueobjects.ProviderEventId;
+package com.liquilabs.vankoo.finance.domain.model.valueobjects;
 
 import java.time.Instant;
 
