@@ -115,7 +115,14 @@ package "application.internal.outboundservices" {
     }
 
     class "DepositEventPublisher" <<(V, #FFA726) Service>> {
+        - eventService : EventService
         + on(event : DepositSucceededEvent) : void
+        + on(event : DepositFailedEvent) : void
+        + on(event : DepositCancelledEvent) : void
+    }
+
+    interface "EventService" <<(O, #78909C) Outbound Service>> {
+        + publishEvent(event : IntegrationEvent) : void
     }
 }
 
@@ -205,6 +212,10 @@ legend bottom
 
   DepositProjection and DepositEventPublisher are not called by anyone here: the
   Axon event processor invokes them from the event stream.
+
+  <b>DepositEventPublisher has exactly three handlers, and that is the selection.</b>
+  The four internal events have none, so there is no list to keep in step with the
+  catalogue. EventService is implemented by infrastructure.brokers.kafka.
 endlegend
 
 @enduml
