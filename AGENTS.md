@@ -128,6 +128,14 @@ return types live in `domain/model/valueobjects`, the errors in
 port's whole point is that it speaks the domain's vocabulary, so giving it a
 parallel one defeats the inversion it exists for.
 
+**The one exception is an envelope, not a vocabulary.**
+`outboundservices/events/IntegrationEvent` is a Kafka record — key, payload,
+headers — and its payload is the domain event, untouched. It names no business
+concept and duplicates nothing in `domain`, which is exactly why it must not go
+there: its fields are broker metadata. The test is whether the type would still
+mean something if the broker disappeared. `ProviderDepositCreated` would;
+`IntegrationEvent` would not.
+
 **`domain/exceptions` holds two families**, and they are not the same thing: what
 the aggregate throws (`InvalidDepositAmountException`, …), and the `sealed`
 `PaymentProviderException` hierarchy the Stripe adapter throws. The first rejects
@@ -248,11 +256,29 @@ clip against PlantUML's 4096px width limit.
   Clustering requires a paid plan; the free tier is non-production use, which
   suits an academic project. See ADR-0002.
 - **Kafka** — `vankoo.finance.events.v1`, keyed by `depositId`. **It has no
-  consumer in v1**: `Wallet` lives inside this same bounded context and will
-  receive events over Axon's internal event bus. Kafka is published to fix the
-  contract, not because anything reads it. Only the three outcomes
-  (`Succeeded`, `Failed`, `Cancelled`) are public; the other four events are
-  internal, each with its reason recorded in the contract.
+  consumer in v1**: `Wallet` lives inside this same bounded context and receives
+  `DepositSucceededEvent` over Axon's internal bus, in `WalletCreditor`. Kafka is
+  published to fix the contract, not because anything reads it.
+
+  Which means **a wrong header breaks nothing today** — it would surface months
+  from now, with a topic full of badly labelled history behind it. **And nothing
+  tests it yet**: Card 8 shipped without automated coverage, deliberately, to be
+  added later. Read `DepositIntegrationEventAssembler` carefully before changing
+  it; there is no safety net under it.
+
+  Three things to know before touching it:
+
+  - **The selection is the absence of methods.** `DepositEventPublisher` has an
+    `@EventHandler` for the three outcomes and none for the other four. Adding one
+    for `DepositInitiatedEvent` would put `idempotencyKey` and `description` on a
+    public topic, and ADR-0001 leaves no way to trim them: domain and integration
+    events share one payload. Count the handlers when reviewing a PR — nothing
+    else does.
+  - **`correlation-id` ← Axon's `traceId`, `causation-id` ← Axon's
+    `correlationId`.** They are crossed on purpose; translating by name swaps them.
+  - **Resetting the `deposit-integration-events` token republishes everything.**
+    At-least-once working as designed, and why consumers deduplicate by `event-id`
+    — but not something to do casually.
 - **Eureka** — the service registers with Vankoo's discovery server.
 
 ## Working with the team

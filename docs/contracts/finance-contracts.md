@@ -649,9 +649,63 @@ El resto son internos, cada uno por su motivo:
 > cuando otros servicios de Vankoo necesiten estos hechos.
 >
 > Se mantiene la publicación desde la v1 para fijar el contrato antes de que
-> exista el primer consumidor, no porque haya uno. Conviene tenerlo presente al
-> priorizar: la Tarjeta 8 entrega infraestructura que nadie consume aún, y podría
-> posponerse sin bloquear ningún flujo de producto.
+> exista el primer consumidor, no porque haya uno.
+>
+> **Consecuencia al implementarlo (Tarjeta 8):** un header equivocado no rompe
+> nada hoy. Saldría a producción en silencio y se descubriría meses después, con
+> un topic lleno de histórico mal etiquetado detrás. Por eso el peso de la
+> tarjeta está en los headers y en sus pruebas, no en el envío.
+
+### Cómo quedó implementado (Tarjeta 8)
+
+| Pieza | Clase |
+|---|---|
+| Selección y publicación | `application/internal/outboundservices/events/DepositEventPublisher` |
+| Ensamblado de key y headers | `.../events/DepositIntegrationEventAssembler` |
+| Mensaje del puerto | `.../events/IntegrationEvent` |
+| Puerto de salida | `.../events/EventService` |
+| Productor Kafka | `infrastructure/brokers/kafka/services/EventServiceImpl` |
+| Binding lógico | `finance-out-0`, en los perfiles `dev` y `docker` |
+| Processing group | `deposit-integration-events` |
+
+Tres cosas que el código hace explícitas:
+
+- **La selección es la ausencia de métodos.** Solo los tres desenlaces tienen
+  `@EventHandler`; los cuatro internos no tienen ninguno. No hay lista ni `if` que
+  mantener en sincronía con este catálogo. Añadir uno para
+  `DepositInitiatedEvent` expondría `idempotencyKey` y `description` en un topic
+  público, así que la regla al revisar un PR es contar los handlers: deben ser
+  tres. **Nada lo comprueba automáticamente todavía** — ver más abajo.
+- **El publicador tiene grupo propio, separado de `wallet-crediting`.** Si Kafka
+  está caído, este token se queda atrás y reintenta mientras el acreditado del
+  monedero sigue avanzando. Compartir grupo dejaría que el broker frene el
+  negocio, que es lo contrario de lo que vale publicar sin consumidor.
+- **`IntegrationEvent` exige los ocho headers obligatorios en su constructor**, en
+  el momento de publicar, en vez de dejar que la falta aparezca en casa de un
+  consumidor futuro.
+
+**Cuidado con resetear el token de `deposit-integration-events`:** republica todos
+los desenlaces desde el principio. Es at-least-once funcionando como debe —y la
+razón de que el contrato obligue a deduplicar por `event-id`— pero no es algo que
+hacer a la ligera.
+
+**La key del registro necesita configuración.** El binder serializa las keys como
+`byte[]` por defecto; el `depositId` es un `String`, así que los perfiles fijan
+`key.serializer` al de String. Sin eso la clave de partición sale mal y se pierde
+la garantía de orden por recarga.
+
+> **La Tarjeta 8 no trae pruebas automáticas.** Se integran más adelante; no
+> estaban en el alcance de esta entrega. Conviene saber qué queda sin red,
+> porque en esta pieza el coste de un fallo es diferido: Kafka no tiene
+> consumidor, así que nada se rompe hoy y el error aparecería meses después con
+> un topic lleno de histórico mal etiquetado detrás. Lo que hay que cubrir cuando
+> se retomen, por orden de riesgo:
+>
+> 1. Que `correlation-id` salga del `traceId` y `causation-id` del
+>    `correlationId`. Es lo que un refactor invierte sin que nadie lo note.
+> 2. Que `DepositEventPublisher` tenga exactamente tres `@EventHandler`.
+> 3. Que el mensaje llegue al binding con la key puesta y los nueve headers
+>    intactos. `spring-cloud-stream-test-binder` ya está en el `pom` para eso.
 
 La regla es: un evento de dominio público y su evento de integración comparten
 el mismo payload de negocio. No se publican mensajes técnicos de Axon, clases
@@ -685,6 +739,47 @@ Los metadatos técnicos viajan en headers, no dentro del objeto de dominio:
 El `event-id` debe conservarse durante los reintentos del productor. Los
 consumidores deben deduplicar por `event-id` o por una clave de negocio
 equivalente.
+
+#### De dónde sale cada header (Tarjeta 8)
+
+Todos los arma `DepositIntegrationEventAssembler`, en
+`application/internal/outboundservices/events`:
+
+| Header | Fuente |
+|---|---|
+| `event-type` | nombre simple de la clase del payload |
+| `event-version` | constante `1` |
+| `event-id` | `EventMessage.getIdentifier()`, del event store |
+| `aggregate-type` | constante `Deposit` |
+| `aggregate-id` | `depositId` del payload, igual que la key |
+| `occurred-at` | `EventMessage.getTimestamp()` en ISO-8601 |
+| `correlation-id` | metadata de Axon: **`traceId`** |
+| `causation-id` | metadata de Axon: **`correlationId`** |
+| `content-type` | constante `application/json` |
+
+**Los dos de correlación están cruzados, y es correcto.** Axon llama
+`correlationId` al mensaje que causó este, y `traceId` al que inició toda la
+cadena. Este contrato define `correlation-id` como «la operación de negocio
+completa» —o sea, el `traceId` de Axon— y `causation-id` como «el mensaje que
+causó este evento» —el `correlationId` de Axon—. Traducirlos por nombre los
+intercambia. Los pone Axon solo, vía `MessageOriginProvider`, activo por defecto.
+
+Cuando no hay `traceId` —un evento sin nada aguas arriba— `correlation-id` cae
+al identificador del propio evento: un evento sin cadena previa es el inicio de
+la suya. El header es obligatorio, y fallar ahí detendría el token del procesador
+y con él la publicación de todo lo que venga detrás.
+
+`event-id` sale del event store y no se genera al publicar: por eso se conserva
+entre reintentos del productor, que es lo que hace posible la deduplicación en
+el consumidor.
+
+#### Sobre el ítem «mappers de Domain Event a Integration Event»
+
+No hay mapper de payload, y no debe haberlo: el ADR-0001 fija que ambos
+comparten el mismo payload de negocio. El mapeo que sí existe es **evento de
+dominio → mensaje Kafka**: construye key y headers alrededor del payload y lo
+deja intacto. Un mapper que recortara campos dejaría además sin sentido el motivo
+por el que `DepositInitiatedEvent` no se publica.
 
 ### Ejemplo de registro Kafka
 
