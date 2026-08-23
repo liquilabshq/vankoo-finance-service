@@ -672,9 +672,10 @@ Tres cosas que el código hace explícitas:
 
 - **La selección es la ausencia de métodos.** Solo los tres desenlaces tienen
   `@EventHandler`; los cuatro internos no tienen ninguno. No hay lista ni `if` que
-  mantener en sincronía con este catálogo. Una prueba afirma que la clase tiene
-  exactamente tres handlers, para que nadie añada uno para
-  `DepositInitiatedEvent` sin notar que expone `idempotencyKey` y `description`.
+  mantener en sincronía con este catálogo. Añadir uno para
+  `DepositInitiatedEvent` expondría `idempotencyKey` y `description` en un topic
+  público, así que la regla al revisar un PR es contar los handlers: deben ser
+  tres. **Nada lo comprueba automáticamente todavía** — ver más abajo.
 - **El publicador tiene grupo propio, separado de `wallet-crediting`.** Si Kafka
   está caído, este token se queda atrás y reintenta mientras el acreditado del
   monedero sigue avanzando. Compartir grupo dejaría que el broker frene el
@@ -692,6 +693,19 @@ hacer a la ligera.
 `byte[]` por defecto; el `depositId` es un `String`, así que los perfiles fijan
 `key.serializer` al de String. Sin eso la clave de partición sale mal y se pierde
 la garantía de orden por recarga.
+
+> **La Tarjeta 8 no trae pruebas automáticas.** Se integran más adelante; no
+> estaban en el alcance de esta entrega. Conviene saber qué queda sin red,
+> porque en esta pieza el coste de un fallo es diferido: Kafka no tiene
+> consumidor, así que nada se rompe hoy y el error aparecería meses después con
+> un topic lleno de histórico mal etiquetado detrás. Lo que hay que cubrir cuando
+> se retomen, por orden de riesgo:
+>
+> 1. Que `correlation-id` salga del `traceId` y `causation-id` del
+>    `correlationId`. Es lo que un refactor invierte sin que nadie lo note.
+> 2. Que `DepositEventPublisher` tenga exactamente tres `@EventHandler`.
+> 3. Que el mensaje llegue al binding con la key puesta y los nueve headers
+>    intactos. `spring-cloud-stream-test-binder` ya está en el `pom` para eso.
 
 La regla es: un evento de dominio público y su evento de integración comparten
 el mismo payload de negocio. No se publican mensajes técnicos de Axon, clases

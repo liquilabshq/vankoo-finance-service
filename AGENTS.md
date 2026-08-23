@@ -261,8 +261,10 @@ clip against PlantUML's 4096px width limit.
   published to fix the contract, not because anything reads it.
 
   Which means **a wrong header breaks nothing today** — it would surface months
-  from now, with a topic full of badly labelled history behind it. That is why
-  `DepositIntegrationEventAssembler` has more tests than its size suggests.
+  from now, with a topic full of badly labelled history behind it. **And nothing
+  tests it yet**: Card 8 shipped without automated coverage, deliberately, to be
+  added later. Read `DepositIntegrationEventAssembler` carefully before changing
+  it; there is no safety net under it.
 
   Three things to know before touching it:
 
@@ -270,7 +272,8 @@ clip against PlantUML's 4096px width limit.
     `@EventHandler` for the three outcomes and none for the other four. Adding one
     for `DepositInitiatedEvent` would put `idempotencyKey` and `description` on a
     public topic, and ADR-0001 leaves no way to trim them: domain and integration
-    events share one payload. A test asserts the handler count.
+    events share one payload. Count the handlers when reviewing a PR — nothing
+    else does.
   - **`correlation-id` ← Axon's `traceId`, `causation-id` ← Axon's
     `correlationId`.** They are crossed on purpose; translating by name swaps them.
   - **Resetting the `deposit-integration-events` token republishes everything.**
