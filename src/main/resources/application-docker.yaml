@@ -8,6 +8,30 @@ spring:
     username: ${FINANCE_DB_USERNAME:admin}
     password: ${FINANCE_DB_PASSWORD:password}
 
+  cloud:
+    stream:
+      kafka:
+        binder:
+          # Dentro de Docker, Kafka se ve por el puerto interno del compose
+          brokers: ${KAFKA_HOST:kafka-broker}:${KAFKA_INTERNAL_PORT:9094}
+          auto-create-topics: true
+          producer-properties:
+            acks: all # El mensaje se replica en todos los brokers antes de darlo por enviado
+            retries: 3
+            # Evita duplicados si un reintento del productor llega dos veces. Es una
+            # barrera distinta del event-id: esa la usa el consumidor, esta el broker.
+            enable.idempotence: true
+      bindings:
+        # El nombre debe coincidir con EventServiceImpl.BINDING: no hay enlace de compilacion.
+        finance-out-0:
+          destination: vankoo.finance.events.v1 # Un solo topic; se discrimina por el header event-type
+          content-type: application/json
+          producer:
+            configuration:
+              # La key del registro es el depositId, un String. Sin esto el binder
+              # serializa keys como byte[] y la clave de particion sale mal.
+              key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
 axon:
   axonserver:
     # Dentro de Docker, el host es el nombre del servicio de Axon Server en el compose

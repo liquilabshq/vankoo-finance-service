@@ -7,6 +7,29 @@ spring:
     username: ${FINANCE_DB_USERNAME:admin}
     password: ${FINANCE_DB_PASSWORD:password}
 
+  cloud:
+    stream:
+      kafka:
+        binder:
+          brokers: ${KAFKA_HOST:localhost}:${KAFKA_EXTERNAL_PORT:9092}
+          auto-create-topics: true
+          producer-properties:
+            acks: all # El mensaje se replica en todos los brokers antes de darlo por enviado
+            retries: 3
+            # Evita duplicados si un reintento del productor llega dos veces. Es una
+            # barrera distinta del event-id: esa la usa el consumidor, esta el broker.
+            enable.idempotence: true
+      bindings:
+        # El nombre debe coincidir con EventServiceImpl.BINDING: no hay enlace de compilacion.
+        finance-out-0:
+          destination: vankoo.finance.events.v1 # Un solo topic; se discrimina por el header event-type
+          content-type: application/json
+          producer:
+            configuration:
+              # La key del registro es el depositId, un String. Sin esto el binder
+              # serializa keys como byte[] y la clave de particion sale mal.
+              key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
 axon:
   axonserver:
     servers: ${AXON_SERVER_HOST:localhost}:${AXON_SERVER_PORT:8124} # En desarrollo, Axon Server corre suelto en localhost
