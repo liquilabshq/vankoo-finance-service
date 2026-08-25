@@ -1,4 +1,4 @@
-package com.liquilabs.vankoo.finance.application.internal.commandservices;
+package com.liquilabs.vankoo.finance.application.internal.eventhandlers;
 
 import com.liquilabs.vankoo.finance.domain.model.commands.CreditWalletCommand;
 import com.liquilabs.vankoo.finance.domain.model.commands.OpenWalletCommand;
