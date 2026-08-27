@@ -41,18 +41,18 @@ package "domain.model.queries" {
     }
     class "DepositSummary" <<(R, #BA68C8) Query Result>> {
     }
+    class "DepositSummaryPage" <<(R, #BA68C8) Query Result>> {
+    }
 }
 
 package "domain.services" {
     interface "DepositCommandService" <<(S, #FF8A65) Domain Service>> {
         + handle(command : InitiateDepositCommand) : DepositId
-        + handle(command : RegisterDepositProviderReferenceCommand) : void
-        + handle(command : ApplyProviderDepositUpdateCommand) : void
     }
 
     interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
-        + handle(query : GetDepositByIdQuery) : DepositSummary
-        + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
+        + getDepositById(query : GetDepositByIdQuery) : Optional<DepositSummary>
+        + listDepositsByAccount(query : ListDepositsByAccountQuery) : DepositSummaryPage
     }
 
     interface "WebhookInboxService" <<(S, #FF8A65) Domain Service>> {
@@ -70,11 +70,9 @@ package "domain.model.aggregates" {
 
 package "application.internal.commandservices" {
     class "DepositCommandServiceImpl" <<(V, #FFA726) Service>> {
+        - idempotencyRepository : DepositCommandIdempotencyRepository
         - commandGateway : CommandGateway
-        - paymentProvider : PaymentProvider
-        - idempotencyRepository : DepositIdempotencyRepository
         + handle(command : InitiateDepositCommand) : DepositId
-        + handle(command : ApplyProviderDepositUpdateCommand) : void
     }
 
     class "WebhookInboxServiceImpl" <<(V, #FFA726) Service>> {
@@ -96,8 +94,8 @@ package "application.internal.eventhandlers" {
 package "application.internal.queryservices" {
     class "DepositQueryServiceImpl" <<(V, #FFA726) Service>> {
         - depositViewRepository : DepositViewRepository
-        + handle(query : GetDepositByIdQuery) : DepositSummary
-        + handle(query : ListDepositsByAccountQuery) : List<DepositSummary>
+        + getDepositById(query : GetDepositByIdQuery) : Optional<DepositSummary>
+        + listDepositsByAccount(query : ListDepositsByAccountQuery) : DepositSummaryPage
     }
 
     class "DepositProjection" <<(V, #FFA726) Service>> {
@@ -142,24 +140,23 @@ package "infrastructure.persistence.jpa.repositories" {
         + insertIfAbsent(...) : int
     }
 
-    interface "DepositIdempotencyRepository" <<(R, #90A4AE) Repository>> {
-        + findDepositId(accountId : UUID, idempotencyKey : String) : UUID
+    interface "DepositCommandIdempotencyRepository" <<(R, #90A4AE) Repository>> {
+        + insertIfAbsent(...) : int
+        + findByAccountIdAndIdempotencyKey(accountId : AccountId, idempotencyKey : String) : Optional<DepositCommandIdempotency>
     }
 }
 
 ' ---------- command delegation ----------
 DepositCommandServiceImpl ..|> DepositCommandService : implements >
 DepositCommandServiceImpl ..> InitiateDepositCommand : handles >
-DepositCommandServiceImpl ..> ApplyProviderDepositUpdateCommand : handles >
 DepositCommandServiceImpl ..> Deposit : dispatches to >
-DepositCommandServiceImpl ..> PaymentProvider : creates external charge >
-DepositCommandServiceImpl ..> DepositIdempotencyRepository : checks Idempotency-Key >
+DepositCommandServiceImpl ..> DepositCommandIdempotencyRepository : checks Idempotency-Key >
 
 WebhookInboxServiceImpl ..|> WebhookInboxService : implements >
 WebhookInboxServiceImpl ..> ProviderWebhookInboxRepository : deduplicates and parks >
 WebhookInboxServiceImpl ..> DepositProviderReferenceRepository : resolves depositId >
 WebhookInboxServiceImpl ..> ApplyProviderDepositUpdateCommand : builds >
-WebhookInboxServiceImpl ..> DepositCommandService : delegates >
+WebhookInboxServiceImpl ..> Deposit : dispatches to (via CommandGateway directly, still) >
 
 DepositProviderReferenceRegisteredEventHandler ..> DepositProviderReferenceRepository : writes >
 
@@ -179,6 +176,12 @@ note bottom of DepositCommandServiceImpl
   Invariants live in the aggregate: the service
   never inspects the deposit state to choose
   what to do next.
+
+  It does not call PaymentProvider either: nothing
+  reacts to DepositInitiatedEvent yet to create the
+  charge, so a deposit created through POST
+  /v1/deposits stays PENDING. Tracked separately in
+  Trello, not this card's scope.
 end note
 
 note bottom of DepositQueryServiceImpl
@@ -202,8 +205,12 @@ legend bottom
   return types and its sealed error hierarchy all live in domain: the port states
   what can be asked of a provider, not a vocabulary to ask it in.
 
-  <b>WebhookInboxServiceImpl dispatches through Axon's CommandGateway for now.</b>
-  The delegation to DepositCommandService drawn here lands with that interface.
+  <b>WebhookInboxServiceImpl still dispatches ApplyProviderDepositUpdateCommand
+  through Axon's CommandGateway directly.</b> DepositCommandService exists now
+  (Card 4), but only declares handle(InitiateDepositCommand) — the REST card
+  that introduced it deliberately did not extend it to also cover
+  ApplyProviderDepositUpdateCommand or rewire the inbox, to avoid touching
+  webhook-inbox code it did not need to change.
 
   <b>application.internal.eventhandlers is for handlers of OUR OWN events that are
   not the read model projection.</b> DepositProviderReferenceRegisteredEventHandler

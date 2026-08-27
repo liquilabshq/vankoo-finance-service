@@ -309,11 +309,14 @@ travels as an enum instead of a `String`, and the inbox keeps a SHA-256 of the r
 payload rather than the payload — so there is no Stripe body to define a retention
 policy for.
 
-Two things Card 7 leaves open on purpose:
+One thing Card 7 leaves open on purpose:
 
-- **`DepositCommandService` does not exist yet** (Card 4). The inbox dispatches
-  through Axon's `CommandGateway` directly, with a `TODO` on the single line that
-  changes when the interface lands. The class diagram already shows the intended
-  delegation.
 - **Exhausted `PARKED` rows and `DISCARDED` rows have no owner.** They log an
   `error` and stay in the table. No alerting, no reprocessing tool.
+
+Card 4 added `DepositCommandService`, but only `handle(InitiateDepositCommand)`
+— what the REST layer needs, not what the webhook inbox needs. The inbox still
+dispatches `ApplyProviderDepositUpdateCommand` through Axon's `CommandGateway`
+directly, with the same `TODO` as before: extending the interface to also cover
+that command, and rewiring the inbox, is separate work, deliberately left out
+of Card 4 to avoid touching inbox code it did not need to change.
