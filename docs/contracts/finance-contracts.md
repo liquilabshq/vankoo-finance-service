@@ -559,10 +559,13 @@ Tres detalles del diseño que el código hace explícitos:
   lo que el agregado rechaza de forma definitiva (estado terminal o referencia
   que no coincide).
 
-**Desviación temporal del diagrama de clases:** el diagrama muestra
-`WebhookInboxService → DepositCommandService`, pero esa interfaz llega con la
-Tarjeta 4. Mientras tanto el inbox despacha por el `CommandGateway` de Axon, con
-un `TODO` que marca la única línea a cambiar.
+**Desviación que sigue en pie tras la Tarjeta 4:** `DepositCommandService` ya
+existe, pero solo declara `handle(InitiateDepositCommand)` — lo que necesita la
+capa REST, no lo que necesita el inbox. El inbox sigue despachando
+`ApplyProviderDepositUpdateCommand` por el `CommandGateway` de Axon
+directamente, con el mismo `TODO` de antes: extender la interfaz para cubrir
+ese comando y recablear el inbox es trabajo aparte, deliberadamente fuera de la
+Tarjeta 4 para no tocar código del inbox sin necesidad.
 
 **Clasificación de fallos al despachar.** El inbox distingue definitivo de
 transitorio recorriendo la cadena de causas en busca de
@@ -575,7 +578,7 @@ reintentable pierde en silencio una actualización de recarga.
 ### Idempotencia de comandos de cliente
 
 ```text
-finance_ops.deposit_command_idempotency
+finance_ops.deposit_command_idempotencies
   UNIQUE(account_id, idempotency_key)
   stores(deposit_id, request_hash)
 ```
@@ -583,6 +586,18 @@ finance_ops.deposit_command_idempotency
 - `Idempotency-Key` es obligatorio para iniciar una recarga.
 - La misma clave con el mismo contenido devuelve el mismo `depositId`.
 - La misma clave con contenido distinto produce un conflicto (`409`).
+
+**Implementado en la Tarjeta 4** (`DepositCommandServiceImpl`, en
+`application/internal/commandservices`): inserta primero, despacha después —
+mismo principio que el inbox de webhooks, pero en el orden inverso, porque acá
+lo que hay que evitar es que dos solicitudes concurrentes con la misma clave
+despachen `InitiateDepositCommand` dos veces, no perder una entrega. El
+`request_hash` es un SHA-256 de los campos significativos de la solicitud
+(`accountId`, `amountMinor`, `currency`, `provider`, `description`). El método
+va en una única transacción que también envuelve el despacho del comando: si
+`InitiateDepositCommand` es rechazado, la fila de idempotencia se revierte con
+él, en vez de quedar apuntando para siempre a un `depositId` que nunca llegó a
+existir.
 
 ### Resolución de referencias del proveedor
 
@@ -918,21 +933,14 @@ El mapeo columna ↔ value object se declara **una sola vez** con
 que los value objects de dominio no lleven ninguna anotación de JPA y para no
 escribir el mapeo query por query.
 
-> **Decisión abierta.** Esta separación en tres tipos está sujeta a revisión.
-> La alternativa es que `DepositQueryService` viva solo en `application` y
-> devuelva directamente la `@Entity`, quedándose en dos tipos. Es más ligero y
-> es lo que sugiere la figura 6-7, que no modela ningún tipo de retorno.
->
-> Se elige la separación en tres porque la interfaz del query service vive en
-> `domain/services` —siguiendo el modelo de referencia de la clase— y el dominio
-> no puede depender de infraestructura. La alternativa además añadiría una
-> arista `interfaces → infrastructure`, que hoy no existe, y expondría la
-> `@Entity` a la serialización JSON.
->
-> Si al implementar la Tarjeta 4 el tercer tipo resulta puro peso muerto, la
-> salida es mover `DepositQueryService` fuera del dominio y borrar
-> `DepositSummary`. Ninguna de las dos opciones afecta a los eventos, al event
-> store ni a los contratos de Kafka.
+> **Decisión resuelta en la Tarjeta 4.** Estaba abierta si `DepositSummary`
+> se justificaba o era peso muerto entre la `@Entity` y el JSON de respuesta.
+> `DepositResourceFromSummaryAssembler` (`interfaces/rest/transform`) es el
+> tercer consumidor que faltaba: lee `DepositSummary`, nunca
+> `DepositViewEntity`, así que el tipo intermedio sí tiene un motivo — sin él,
+> el assembler tendría que importar `infrastructure/persistence/jpa`, la arista
+> `interfaces → infrastructure` que esta separación existe para evitar. Se
+> mantienen los tres tipos.
 
 ### HTTP como adaptador
 
@@ -948,6 +956,15 @@ Gateway:
 
 `POST /v1/deposits` responde `202 Accepted` con `depositId` y estado `PENDING`.
 La creación del recurso externo y la actualización del Read Model son asíncronas.
+
+**Los tres primeros están implementados desde la Tarjeta 4**, en
+`interfaces/rest/{controllers,resources,transform}` — ver
+`docs/uml/finance-rest-api-class-diagram.puml`. Un matiz sobre el `202`: eso es
+literal solo para una creación nueva; si `Idempotency-Key` se repite con el
+mismo contenido, la respuesta trae el estado real del depósito, no siempre
+`PENDING` — para entonces ya lleva un rato existiendo, así que consultar el
+Read Model es seguro (no hay carrera con el projector, a diferencia de justo
+después del despacho).
 
 ---
 
@@ -1263,8 +1280,20 @@ negocio.
   del cuerpo, no el cuerpo. Queda abierto, en cambio, **qué hacer con las filas
   `PARKED` agotadas y las `DISCARDED`**: hoy se quedan ahí y disparan un `error`
   en el log, sin alerta ni herramienta de reproceso.
-- **Revisar en la Tarjeta 4 si `DepositSummary` se justifica**, o si conviene
-  mover `DepositQueryService` fuera del dominio y quedarse en dos tipos.
+- ~~Revisar en la Tarjeta 4 si `DepositSummary` se justifica, o si conviene
+  mover `DepositQueryService` fuera del dominio y quedarse en dos tipos.~~ →
+  **resuelto en la Tarjeta 4: se mantiene.**
+  `DepositResourceFromSummaryAssembler` es el tercer consumidor —ver
+  "Los tres tipos del lado de lectura".
+- **Nada dispara todavía la creación del cargo en Stripe tras
+  `DepositInitiatedEvent`.** La Tarjeta 4 entrega la capa REST completa —un
+  cliente puede iniciar y consultar una recarga— pero un depósito creado por
+  `POST /v1/deposits` se queda en `PENDING` para siempre: ningún
+  `@EventHandler` reacciona a `DepositInitiatedEvent` para llamar a
+  `PaymentProvider.createDeposit`. Detectado al implementar la Tarjeta 4,
+  deliberadamente fuera de su alcance (es una pieza separada: nuevo event
+  handler, manejo de `PaymentProviderException`/reintentos). Tarjeta nueva en
+  Trello, sin dueño.
 - **Diseñar el contrato del agregado `Wallet`/`Ledger`**, segundo agregado de
   este mismo bounded context, que consumirá `DepositSucceededEvent` por el event
   bus de Axon y acreditará el saldo. Es el siguiente contrato, no un pendiente

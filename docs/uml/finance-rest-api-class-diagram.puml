@@ -32,7 +32,7 @@ package "interfaces.rest" {
             - depositQueryService : DepositQueryService
             + createDeposit(idempotencyKey : String, resource : CreateDepositResource) : ResponseEntity<DepositResource>
             + getDeposit(depositId : String) : ResponseEntity<DepositResource>
-            + listDeposits(accountId : String, page : int, size : int) : ResponseEntity<List<DepositResource>>
+            + listDeposits(accountId : String, page : int, size : int) : ResponseEntity<DepositSummaryPageResource>
         }
     }
 
@@ -54,17 +54,32 @@ package "interfaces.rest" {
             + status : String
             + actionUrl : String
             + failureReason : String
+            + description : String
+            + cancellationReason : String
             + createdAt : String
+            + updatedAt : String
+        }
+
+        class "DepositSummaryPageResource" <<(S, #4FC3F7) Resource>> {
+            + items : List<DepositResource>
+            + pageNumber : int
+            + pageSize : int
+            + totalElements : long
         }
     }
 
     package "transform" {
         class "CreateDepositCommandFromResourceAssembler" <<(A, #FDD835) Assembler>> {
             + {static} toCommandFromResource(resource : CreateDepositResource, idempotencyKey : String) : InitiateDepositCommand
+            + {static} toPendingResourceFrom(depositId : DepositId, resource : CreateDepositResource) : DepositResource
         }
 
         class "DepositResourceFromSummaryAssembler" <<(A, #FDD835) Assembler>> {
             + {static} toResourceFromSummary(summary : DepositSummary) : DepositResource
+        }
+
+        class "DepositSummaryPageResourceFromPageAssembler" <<(A, #FDD835) Assembler>> {
+            + {static} toResourceFromPage(page : DepositSummaryPage) : DepositSummaryPageResource
         }
     }
 }
@@ -76,7 +91,13 @@ package "domain.model" {
     class "GetDepositByIdQuery" <<(Q, #4DB6AC) Query>> {
     }
 
+    class "ListDepositsByAccountQuery" <<(Q, #4DB6AC) Query>> {
+    }
+
     class "DepositSummary" <<(R, #BA68C8) Query Result>> {
+    }
+
+    class "DepositSummaryPage" <<(R, #BA68C8) Query Result>> {
     }
 }
 
@@ -86,7 +107,8 @@ package "domain.services" {
     }
 
     interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
-        + handle(query : GetDepositByIdQuery) : DepositSummary
+        + getDepositById(query : GetDepositByIdQuery) : Optional<DepositSummary>
+        + listDepositsByAccount(query : ListDepositsByAccountQuery) : DepositSummaryPage
     }
 }
 
@@ -100,13 +122,21 @@ DepositCommandService ..> InitiateDepositCommand : handles >
 
 ' ---------- outbound: query result becomes a resource ----------
 DepositController ..> GetDepositByIdQuery : builds >
+DepositController ..> ListDepositsByAccountQuery : builds >
 DepositController ..> DepositQueryService : queries >
 DepositQueryService ..> GetDepositByIdQuery : handles >
+DepositQueryService ..> ListDepositsByAccountQuery : handles >
 DepositQueryService ..> DepositSummary : returns >
+DepositQueryService ..> DepositSummaryPage : returns >
 DepositController ..> DepositResourceFromSummaryAssembler : uses >
 DepositResourceFromSummaryAssembler ..> DepositSummary : reads >
 DepositResourceFromSummaryAssembler ..> DepositResource : builds >
+DepositController ..> DepositSummaryPageResourceFromPageAssembler : uses >
+DepositSummaryPageResourceFromPageAssembler ..> DepositSummaryPage : reads >
+DepositSummaryPageResourceFromPageAssembler ..> DepositResourceFromSummaryAssembler : delegates each item to >
+DepositSummaryPageResourceFromPageAssembler ..> DepositSummaryPageResource : builds >
 DepositController --> DepositResource : returns >
+DepositController --> DepositSummaryPageResource : returns >
 
 note bottom of DepositController
   The controller holds no business rules.
@@ -121,6 +151,15 @@ note right of CreateDepositCommandFromResourceAssembler
   Idempotency-Key arrives as an HTTP header,
   not in the body, so the controller passes it
   in explicitly.
+
+  toPendingResourceFrom builds the 202 body for
+  a *first-time* create without querying: the
+  projection's @EventHandler runs on Axon's own
+  processor, not inside sendAndWait, so querying
+  right after dispatch risks reading before the
+  row exists. A replay (same Idempotency-Key,
+  same content) is safe to query for real, since
+  the deposit has existed for a while by then.
 end note
 
 legend bottom
@@ -131,7 +170,14 @@ legend bottom
   the domain and the aggregate never reaches the API.
 
   POST /v1/deposits answers 202 Accepted with the depositId in PENDING: the
-  provider call and the projection update happen afterwards.
+  provider call and the projection update happen afterwards. Nothing triggers
+  that provider call yet (Card 8 gap, tracked separately) — a deposit created
+  through this endpoint stays PENDING today.
+
+  A repeated Idempotency-Key with the same content answers 202 with the
+  deposit's real current status, not always PENDING: DepositController tells a
+  replay apart from a first-time create by comparing the depositId it minted
+  against the one DepositCommandService.handle(...) returns.
 endlegend
 
 @enduml
