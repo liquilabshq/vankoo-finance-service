@@ -98,6 +98,27 @@ class DepositControllerTest {
     }
 
     @Test
+    void createDeposit_unsupportedCurrency_respondsBadRequest() throws Exception {
+        // UnsupportedCurrencyException does not extend IllegalArgumentException,
+        // so this exercises a distinct catch branch from the malformed-id cases.
+        String body = objectMapper.writeValueAsString(new java.util.HashMap<>() {{
+            put("accountId", ACCOUNT_ID);
+            put("amountMinor", 12_500L);
+            put("currency", "EUR");
+            put("provider", "STRIPE");
+            put("description", "Recarga de saldo");
+        }});
+
+        mockMvc.perform(post("/v1/deposits")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isBadRequest());
+
+        verify(depositCommandService, never()).handle(any());
+    }
+
+    @Test
     void createDeposit_conflictingIdempotencyKey_respondsConflict() throws Exception {
         when(depositCommandService.handle(any())).thenThrow(new IdempotencyKeyConflictException("conflict"));
 

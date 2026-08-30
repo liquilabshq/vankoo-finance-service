@@ -2,6 +2,7 @@ package com.liquilabs.vankoo.finance.interfaces.rest.controllers;
 
 import com.liquilabs.vankoo.finance.domain.exceptions.IdempotencyKeyConflictException;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidDepositAmountException;
+import com.liquilabs.vankoo.finance.domain.exceptions.UnsupportedCurrencyException;
 import com.liquilabs.vankoo.finance.domain.model.commands.InitiateDepositCommand;
 import com.liquilabs.vankoo.finance.domain.model.queries.DepositSummaryPage;
 import com.liquilabs.vankoo.finance.domain.model.queries.GetDepositByIdQuery;
@@ -76,7 +77,7 @@ public class DepositController {
         InitiateDepositCommand command;
         try {
             command = CreateDepositCommandFromResourceAssembler.toCommandFromResource(resource, idempotencyKey);
-        } catch (IllegalArgumentException exception) {
+        } catch (IllegalArgumentException | UnsupportedCurrencyException exception) {
             return ResponseEntity.badRequest().build();
         }
 

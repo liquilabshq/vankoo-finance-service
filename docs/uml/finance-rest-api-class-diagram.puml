@@ -34,6 +34,12 @@ package "interfaces.rest" {
             + getDeposit(depositId : String) : ResponseEntity<DepositResource>
             + listDeposits(accountId : String, page : int, size : int) : ResponseEntity<DepositSummaryPageResource>
         }
+
+        class "WalletController" <<(C, #42A5F5) Controller>> {
+            - walletQueryService : WalletQueryService
+            + getWalletBalance(accountId : String, currency : String) : ResponseEntity<WalletResource>
+            + listWalletMovements(accountId : String, currency : String, page : int, size : int) : ResponseEntity<WalletMovementPageResource>
+        }
     }
 
     package "resources" {
@@ -66,6 +72,31 @@ package "interfaces.rest" {
             + pageSize : int
             + totalElements : long
         }
+
+        class "WalletResource" <<(S, #4FC3F7) Resource>> {
+            + walletId : String
+            + accountId : String
+            + currency : String
+            + balanceMinor : long
+            + createdAt : String
+            + updatedAt : String
+        }
+
+        class "WalletMovementResource" <<(S, #4FC3F7) Resource>> {
+            + type : String
+            + direction : String
+            + amountMinor : long
+            + currency : String
+            + sourceDepositId : String
+            + occurredAt : String
+        }
+
+        class "WalletMovementPageResource" <<(S, #4FC3F7) Resource>> {
+            + items : List<WalletMovementResource>
+            + pageNumber : int
+            + pageSize : int
+            + totalElements : long
+        }
     }
 
     package "transform" {
@@ -80,6 +111,18 @@ package "interfaces.rest" {
 
         class "DepositSummaryPageResourceFromPageAssembler" <<(A, #FDD835) Assembler>> {
             + {static} toResourceFromPage(page : DepositSummaryPage) : DepositSummaryPageResource
+        }
+
+        class "WalletResourceFromBalanceAssembler" <<(A, #FDD835) Assembler>> {
+            + {static} toResourceFromBalance(balance : WalletBalance) : WalletResource
+        }
+
+        class "WalletMovementResourceFromMovementAssembler" <<(A, #FDD835) Assembler>> {
+            + {static} toResourceFromMovement(movement : WalletMovement) : WalletMovementResource
+        }
+
+        class "WalletMovementPageResourceFromPageAssembler" <<(A, #FDD835) Assembler>> {
+            + {static} toResourceFromPage(page : WalletMovementPage) : WalletMovementPageResource
         }
     }
 }
@@ -99,6 +142,21 @@ package "domain.model" {
 
     class "DepositSummaryPage" <<(R, #BA68C8) Query Result>> {
     }
+
+    class "GetWalletBalanceQuery" <<(Q, #4DB6AC) Query>> {
+    }
+
+    class "ListWalletMovementsQuery" <<(Q, #4DB6AC) Query>> {
+    }
+
+    class "WalletBalance" <<(R, #BA68C8) Query Result>> {
+    }
+
+    class "WalletMovement" <<(R, #BA68C8) Query Result>> {
+    }
+
+    class "WalletMovementPage" <<(R, #BA68C8) Query Result>> {
+    }
 }
 
 package "domain.services" {
@@ -109,6 +167,11 @@ package "domain.services" {
     interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
         + getDepositById(query : GetDepositByIdQuery) : Optional<DepositSummary>
         + listDepositsByAccount(query : ListDepositsByAccountQuery) : DepositSummaryPage
+    }
+
+    interface "WalletQueryService" <<(S, #FF8A65) Domain Service>> {
+        + getWalletBalance(query : GetWalletBalanceQuery) : Optional<WalletBalance>
+        + listWalletMovements(query : ListWalletMovementsQuery) : WalletMovementPage
     }
 }
 
@@ -138,11 +201,42 @@ DepositSummaryPageResourceFromPageAssembler ..> DepositSummaryPageResource : bui
 DepositController --> DepositResource : returns >
 DepositController --> DepositSummaryPageResource : returns >
 
+' ---------- Wallet: read-only, no inbound resource/assembler ----------
+WalletController ..> GetWalletBalanceQuery : builds >
+WalletController ..> ListWalletMovementsQuery : builds >
+WalletController ..> WalletQueryService : queries >
+WalletQueryService ..> GetWalletBalanceQuery : handles >
+WalletQueryService ..> ListWalletMovementsQuery : handles >
+WalletQueryService ..> WalletBalance : returns >
+WalletQueryService ..> WalletMovementPage : returns >
+WalletController ..> WalletResourceFromBalanceAssembler : uses >
+WalletResourceFromBalanceAssembler ..> WalletBalance : reads >
+WalletResourceFromBalanceAssembler ..> WalletResource : builds >
+WalletController ..> WalletMovementPageResourceFromPageAssembler : uses >
+WalletMovementPageResourceFromPageAssembler ..> WalletMovementPage : reads >
+WalletMovementPageResourceFromPageAssembler ..> WalletMovementResourceFromMovementAssembler : delegates each item to >
+WalletMovementPageResourceFromPageAssembler ..> WalletMovementPageResource : builds >
+WalletMovementResourceFromMovementAssembler ..> WalletMovement : reads >
+WalletMovementResourceFromMovementAssembler ..> WalletMovementResource : builds >
+WalletController --> WalletResource : returns >
+WalletController --> WalletMovementPageResource : returns >
+
 note bottom of DepositController
   The controller holds no business rules.
   It validates the request format, delegates,
   and translates the answer back.
   It never touches a repository or Axon directly.
+end note
+
+note bottom of WalletController
+  Read-only: no CreateWalletResource, no
+  DepositCommandService-equivalent. A Wallet opened
+  lazily (its own first deposit) means an account with
+  no deposit in a currency has no Wallet yet — not an
+  error. getWalletBalance answers 404 for it (one
+  resource); listWalletMovements answers 200 with an
+  empty page (a collection), symmetric with how
+  listDeposits never 404s for a depositless account.
 end note
 
 note right of CreateDepositCommandFromResourceAssembler

@@ -43,6 +43,15 @@ package "domain.model.queries" {
     }
     class "DepositSummaryPage" <<(R, #BA68C8) Query Result>> {
     }
+
+    class "GetWalletBalanceQuery" <<(Q, #4DB6AC) Query>> {
+    }
+    class "ListWalletMovementsQuery" <<(Q, #4DB6AC) Query>> {
+    }
+    class "WalletBalance" <<(R, #BA68C8) Query Result>> {
+    }
+    class "WalletMovementPage" <<(R, #BA68C8) Query Result>> {
+    }
 }
 
 package "domain.services" {
@@ -53,6 +62,11 @@ package "domain.services" {
     interface "DepositQueryService" <<(S, #FF8A65) Domain Service>> {
         + getDepositById(query : GetDepositByIdQuery) : Optional<DepositSummary>
         + listDepositsByAccount(query : ListDepositsByAccountQuery) : DepositSummaryPage
+    }
+
+    interface "WalletQueryService" <<(S, #FF8A65) Domain Service>> {
+        + getWalletBalance(query : GetWalletBalanceQuery) : Optional<WalletBalance>
+        + listWalletMovements(query : ListWalletMovementsQuery) : WalletMovementPage
     }
 
     interface "WebhookInboxService" <<(S, #FF8A65) Domain Service>> {
@@ -103,6 +117,16 @@ package "application.internal.queryservices" {
         + on(event : DepositInitiatedEvent) : void
         + on(event : DepositSucceededEvent) : void
     }
+
+    class "WalletProjection" <<(V, #FFA726) Service>> {
+        - walletViewRepository : WalletViewRepository
+        - walletMovementRepository : WalletMovementRepository
+        + on(event : WalletOpenedEvent) : void
+        + on(event : WalletCreditedEvent) : void
+        + on(event : WalletDebitedEvent) : void
+        + getWalletBalance(query : GetWalletBalanceQuery) : Optional<WalletBalance>
+        + listWalletMovements(query : ListWalletMovementsQuery) : WalletMovementPage
+    }
 }
 
 package "application.internal.outboundservices" {
@@ -144,6 +168,16 @@ package "infrastructure.persistence.jpa.repositories" {
         + insertIfAbsent(...) : int
         + findByAccountIdAndIdempotencyKey(accountId : AccountId, idempotencyKey : String) : Optional<DepositCommandIdempotency>
     }
+
+    interface "WalletViewRepository" <<(R, #90A4AE) Repository>> {
+        + findByWalletId(walletId : WalletId) : Optional<WalletViewEntity>
+        + existsByWalletId(walletId : WalletId) : boolean
+    }
+
+    interface "WalletMovementRepository" <<(R, #90A4AE) Repository>> {
+        + findByWalletIdOrderByOccurredAtDesc(walletId : WalletId, page : Pageable) : Page<WalletMovementEntity>
+        + insertIfAbsent(...) : int
+    }
 }
 
 ' ---------- command delegation ----------
@@ -171,6 +205,14 @@ DepositQueryServiceImpl ..> DepositSummary : returns >
 
 DepositProjection ..> DepositViewRepository : writes >
 
+WalletProjection ..|> WalletQueryService : implements >
+WalletProjection ..> GetWalletBalanceQuery : handles >
+WalletProjection ..> ListWalletMovementsQuery : handles >
+WalletProjection ..> WalletViewRepository : reads and writes >
+WalletProjection ..> WalletMovementRepository : reads and writes >
+WalletProjection ..> WalletBalance : returns >
+WalletProjection ..> WalletMovementPage : returns >
+
 note bottom of DepositCommandServiceImpl
   The service coordinates, it does not decide.
   Invariants live in the aggregate: the service
@@ -188,6 +230,16 @@ note bottom of DepositQueryServiceImpl
   Queries read the projection. They never load
   the aggregate, so they cost one SQL statement
   instead of a full replay.
+end note
+
+note bottom of WalletProjection
+  Drawn as the one real class it is — unlike the
+  DepositQueryServiceImpl/DepositProjection split
+  above, no separate "WalletQueryServiceImpl" exists
+  in the code. Each on(...) handler updates
+  WalletViewRepository's balance row AND inserts a
+  WalletMovementRepository row, in the same
+  transaction: two Read Model tables from one event.
 end note
 
 legend bottom
@@ -223,6 +275,13 @@ legend bottom
   <b>DepositEventPublisher has exactly three handlers, and that is the selection.</b>
   The four internal events have none, so there is no list to keep in step with the
   catalogue. EventService is implemented by infrastructure.brokers.kafka.
+
+  <b>WalletMovementRepository is this service's first append-only Read Model table.</b>
+  WalletViewRepository upserts one row per wallet, same shape as DepositViewRepository.
+  WalletMovementRepository never updates a row once inserted, so it has no
+  "already applied" guard to check against — insertIfAbsent (keyed on the event id)
+  is the barrier instead, the same idiom finance_ops tables already use for a
+  different reason (deduplicating an admission decision, not a projection write).
 endlegend
 
 @enduml
