@@ -149,11 +149,56 @@ eventos de `Deposit` — el diseño detallado de cada comando/evento queda para
 
 ---
 
+## Lectura (Read Model)
+
+**El saldo se consulta por moneda**, nunca agregado entre monedas — coherente
+con que cada `Wallet` ya vive scoped a `(accountId, currency)`. El cliente
+siempre especifica la moneda.
+
+```text
+GET /v1/accounts/{accountId}/wallets/{currency}            -> saldo
+GET /v1/accounts/{accountId}/wallets/{currency}/movements  -> historial paginado
+```
+
+**`getWalletBalance` responde `404`** cuando el wallet no existe todavía —
+caso normal dado que se abre perezosamente, no un error. **`listWalletMovements`
+nunca responde `404`**: una cuenta sin wallet en esa moneda recibe `200` con
+página vacía, simétrico con `listDeposits`, que tampoco falla para una cuenta
+sin depósitos. El primero direcciona un recurso puntual; el segundo, una
+colección.
+
+**Dos tablas en `finance_read_model`, dos formas de proyección** desde los
+mismos tres eventos:
+
+- `wallet_views` — upsert en el lugar, una fila por wallet, mismo patrón que
+  `deposit_views` (guard `last_event_id`/`alreadyApplied` contra redelivery).
+- `wallet_movements` — append-only, una fila nueva por evento, nunca se
+  actualiza. Es la primera proyección append-only del servicio: no hay fila
+  previa contra la que comparar "¿ya se aplicó?", así que la barrera de
+  deduplicación es `insertIfAbsent` (`UNIQUE(event_id)` + `ON CONFLICT DO
+  NOTHING`), el mismo idioma que ya usan las tablas de `finance_ops`, aplicado
+  acá por primera vez a una tabla de lectura.
+
+Una sola clase (`WalletProjection`) escucha los tres eventos y mantiene las
+dos tablas en la misma transacción — no dos processing groups separados.
+
+**Vocabulario de movimiento del lado de lectura, distinto del de escritura.**
+`WalletMovementType` (el que usa `DebitWalletCommand`) solo tiene motivos de
+débito — `RECARGA` no está ahí porque acreditar es su propio comando. El
+historial necesita etiquetar también los créditos, así que expone su propio
+catálogo (`RECARGA`, `INVERSION`, `RETIRO`, `COMISION`) más una dirección
+(`CREDIT`/`DEBIT`) explícita.
+
+**`GetWalletBalanceQuery`/`ListWalletMovementsQuery` llevan `(accountId,
+currency)` en crudo, no un `WalletId` ya derivado** — a diferencia de
+`GetDepositByIdQuery`, acá el id es una función pura de esos dos datos
+(`WalletId.derive`, sin I/O), así que forzar a cada llamador a derivarlo
+primero solo repite lógica sin necesidad. `WalletProjection` deriva el
+`WalletId` internamente en cada handler de query.
+
+---
+
 ## Pendiente para cuando se implemente
 
-- Contrato exacto de comandos/eventos de `Wallet` (`OpenWalletCommand`,
-  `CreditWalletCommand`, `DebitWalletCommand`, y sus eventos correspondientes).
 - Cómo Investment solicita un débito (comando directo, o su propio evento que
   Finance escucha).
-- Atributos de `Wallet` en `docs/uml/finance-domain-model-diagram.puml` (hoy
-  dibujado a propósito sin ellos).
