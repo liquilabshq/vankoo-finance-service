@@ -1,6 +1,6 @@
 spring:
   application:
-    name: vankoo-finance-service
+    name: finance-service
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
