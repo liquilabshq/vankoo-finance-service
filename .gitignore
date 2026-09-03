@@ -31,3 +31,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Variables de entorno ###
+# .env lleva credenciales reales (STRIPE_SECRET_KEY, contraseña de la BD).
+# Solo se versiona .env.example, con valores de ejemplo.
+.env
+.env.local
+!.env.example
