@@ -4,8 +4,10 @@ Qué variables de entorno necesita `vankoo-finance-service` para hablar con Stri
 de dónde sale cada valor, y qué error verás si falta alguna.
 
 Las variables se declaran en `src/main/resources/application.yaml` bajo el prefijo
-`stripe:` y las lee `StripePaymentProperties`. El archivo `.env.example` de la raíz
-tiene la lista completa de variables del servicio, no solo las de Stripe.
+`stripe:` y las lee `StripePaymentProperties`. **Ese archivo, junto con
+`application-dev.yaml`, es la lista autoritativa** de todo lo que el servicio lee
+del entorno: cada propiedad aparece ahí con su placeholder `${...}` y su default.
+Esta guía no la repite — documenta lo que no se puede deducir leyéndola.
 
 ---
 
@@ -94,6 +96,55 @@ webhook, no por redirección.
 
 ---
 
+## Cómo suministrar los valores en local
+
+**Spring Boot no lee archivos `.env`.** No hay nada en el `pom.xml` que lo haga y
+el framework no lo trae de serie, así que crear un `.env` en la raíz no surte
+ningún efecto: las propiedades se quedan con su default vacío y verás los errores
+de la sección anterior. Es una diferencia real con `vankoo-profile-service`, que
+es NestJS y ahí `dotenv` sí carga el archivo, y con `vankoo-infra`, donde el que
+lo lee es Docker Compose.
+
+Hay dos caminos, y cualquiera de los dos sirve.
+
+### `application-local.yaml` (recomendado)
+
+Crea `src/main/resources/application-local.yaml` — está en `.gitignore`— con solo
+lo que quieras sobrescribir:
+
+```yaml
+stripe:
+  secret-key: sk_test_...
+  webhook-secret: whsec_...
+  success-url: http://localhost:5173/deposits/success
+  cancel-url: http://localhost:5173/deposits/cancel
+```
+
+Y activa el perfil junto al de desarrollo:
+
+```
+SPRING_PROFILES_ACTIVE=dev,local
+```
+
+El orden importa: `local` va después de `dev`, así que gana. Lo que no declares
+ahí conserva el valor de `application-dev.yaml`.
+
+### Variables de entorno en la configuración de ejecución
+
+En IntelliJ, *Run → Edit Configurations → Environment variables*, con los nombres
+tal cual aparecen en los placeholders del YAML (`STRIPE_SECRET_KEY`, etc.). Es
+para lo que existen los `${...}`, y es el mismo mecanismo que usará el contenedor
+cuando el servicio tenga uno: el `docker-compose.yaml` se las pasará por
+`environment:`.
+
+Desde una terminal, el equivalente:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... sh ./mvnw spring-boot:run
+```
+
+---
+
 ## El endpoint de webhooks
 
 ```
@@ -141,8 +192,7 @@ stripe trigger checkout.session.completed
 
 ## Secretos
 
-- **Nunca** en el repositorio. `.env` está en `.gitignore`; solo se versiona
-  `.env.example`, con valores de ejemplo.
+- **Nunca** en el repositorio. `application-local.yaml` está en `.gitignore`.
 - Si una clave se filtra, se revoca desde *Developers → API keys*; rotarla es
   inmediato y no requiere desplegar nada más que la variable nueva.
 - Los logs ya están limpios y conviene que sigan así: ante un error de la API,
@@ -155,7 +205,8 @@ stripe trigger checkout.session.completed
 
 ## Ver también
 
-- `.env.example` — todas las variables del servicio, no solo las de Stripe.
+- `src/main/resources/application.yaml` y `application-dev.yaml` — la lista
+  completa de variables del servicio, con sus defaults.
 - `docs/contracts/finance-contracts.md` — el contrato del puerto `PaymentProvider`
   y la taxonomía de estados.
 - `docs/uml/finance-webhook-sequence-diagram.puml` — el flujo completo del webhook.

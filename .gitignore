@@ -32,9 +32,14 @@ build/
 ### VS Code ###
 .vscode/
 
-### Variables de entorno ###
-# .env lleva credenciales reales (STRIPE_SECRET_KEY, contraseña de la BD).
-# Solo se versiona .env.example, con valores de ejemplo.
+### Configuración local con secretos ###
+# application-local.yaml lleva credenciales reales (STRIPE_SECRET_KEY, la
+# contraseña de la BD). Se activa con SPRING_PROFILES_ACTIVE=dev,local.
+# Ver docs/guides/stripe-configuration.md.
+application-local.yaml
+application-local.yml
+src/main/resources/application-local.yaml
+src/main/resources/application-local.yml
+# Spring Boot no lee .env, pero lo ignoramos por si alguien lo crea por costumbre.
 .env
 .env.local
-!.env.example

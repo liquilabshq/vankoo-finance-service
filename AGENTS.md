@@ -275,9 +275,13 @@ are conventional commits in English, with a body explaining the why.
 - `docs/adr/0001-...md` — Axon Server as event store, Postgres read model, Kafka
 - `docs/adr/0002-...md` — Axon 4 vs 5, and Axon Server licensing
 - `docs/uml/`, `docs/architecture/` — domain model, flows, sequence, C4
-- `docs/guides/stripe-configuration.md` — the Stripe environment variables, which
-  operation needs which, and the exact `IllegalStateException` each missing one
-  throws. `.env.example` at the root lists every variable the service reads.
+- `docs/guides/stripe-configuration.md` — which operation needs which Stripe
+  property, the exact `IllegalStateException` each missing one throws, and how to
+  supply the values locally. The authoritative list of what the service reads from
+  the environment is `application.yaml` itself — the guide does not repeat it.
+  Note that **Spring Boot does not read `.env` files**: local secrets go in a
+  gitignored `application-local.yaml` (`SPRING_PROFILES_ACTIVE=dev,local`) or in
+  the run configuration's environment variables.
 
 The contract has a **"Decisiones pendientes"** section listing what is genuinely
 undecided, each with the reason it was deferred rather than guessed. Card 7 closed
