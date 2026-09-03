@@ -1175,6 +1175,16 @@ negocio.
   bus de Axon y acreditará el saldo. Es el siguiente contrato, no un pendiente
   indefinido. Al definirlo hay que decidir si la acreditación se orquesta con una
   saga o con un event handler que despache un comando.
+- **Un fallo permanente de `createDeposit` deja la recarga en `PENDING` sin manera
+  de fallarla.** `DepositChargeCreator` reintenta los fallos transitorios dejando
+  que el procesador de Axon reponga el evento, pero ante un
+  `PaymentProviderRejectedException` —credenciales inválidas, petición rechazada—
+  solo puede registrar un `error` y seguir. No puede marcar la recarga como
+  `FAILED`: el único camino a ese estado es `ApplyProviderDepositUpdateCommand`,
+  que exige una referencia de proveedor ya registrada y un `providerEventId`, y
+  cuando el cobro nunca llegó a crearse no existe ninguna de las dos cosas.
+  Cerrarlo pide un comando nuevo en el agregado, capaz de fallar una recarga sin
+  referencia externa. Es del dueño del agregado y merece su propia tarjeta.
 
 ## Criterios de aceptación del contrato
 
