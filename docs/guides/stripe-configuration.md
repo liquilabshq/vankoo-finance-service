@@ -109,8 +109,8 @@ Hay dos caminos, y cualquiera de los dos sirve.
 
 ### `application-local.yaml` (recomendado)
 
-Crea `src/main/resources/application-local.yaml` — está en `.gitignore`— con solo
-lo que quieras sobrescribir:
+Crea `config/application-local.yaml` **en la raíz del proyecto** — está en
+`.gitignore` — con solo lo que quieras sobrescribir:
 
 ```yaml
 stripe:
@@ -192,7 +192,12 @@ stripe trigger checkout.session.completed
 
 ## Secretos
 
-- **Nunca** en el repositorio. `application-local.yaml` está en `.gitignore`.
+- **Nunca** en el repositorio. `config/application-local.yaml` está en `.gitignore`.
+- **Y nunca dentro de `src/main/resources/`**, aunque Spring también lo leería
+  desde ahí. Maven copia ese directorio a `target/classes`, así que el secreto
+  acabaría **empaquetado dentro del jar** — y un jar se comparte y se despliega
+  con mucha menos ceremonia que un archivo de configuración. `config/` en la raíz
+  es una ubicación por defecto de Spring Boot y no se empaqueta nunca.
 - Si una clave se filtra, se revoca desde *Developers → API keys*; rotarla es
   inmediato y no requiere desplegar nada más que la variable nueva.
 - Los logs ya están limpios y conviene que sigan así: ante un error de la API,

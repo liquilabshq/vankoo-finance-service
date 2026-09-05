@@ -280,7 +280,9 @@ are conventional commits in English, with a body explaining the why.
   supply the values locally. The authoritative list of what the service reads from
   the environment is `application.yaml` itself — the guide does not repeat it.
   Note that **Spring Boot does not read `.env` files**: local secrets go in a
-  gitignored `application-local.yaml` (`SPRING_PROFILES_ACTIVE=dev,local`) or in
+  gitignored `config/application-local.yaml` at the project root — never under
+  `src/main/resources`, which Maven packages into the jar —
+  (`SPRING_PROFILES_ACTIVE=dev,local`) or in
   the run configuration's environment variables.
 
 The contract has a **"Decisiones pendientes"** section listing what is genuinely
