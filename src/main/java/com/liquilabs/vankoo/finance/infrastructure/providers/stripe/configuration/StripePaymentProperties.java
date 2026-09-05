@@ -22,6 +22,8 @@ public class StripePaymentProperties {
     private String secretKey = "";
     private String webhookSecret = "";
     private String successUrl = "";
+    // Success and cancel only: Checkout has no failure URL. A declined payment
+    // is retried inside Checkout itself and, if it does fail for good, arrives
+    // as a webhook rather than a redirect.
     private String cancelUrl = "";
-    private String failureUrl = "";
 }
