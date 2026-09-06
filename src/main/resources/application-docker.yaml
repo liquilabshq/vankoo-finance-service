@@ -21,16 +21,38 @@ spring:
             # Evita duplicados si un reintento del productor llega dos veces. Es una
             # barrera distinta del event-id: esa la usa el consumidor, esta el broker.
             enable.idempotence: true
+            # El productor tiene que rendirse ANTES que el timeout de handler de Axon
+            # (axon.timeout.handler.events.timeout-ms, 30s por defecto), o el janitor
+            # interrumpe el hilo y el fallo llega como AxonTimeoutException en vez de
+            # como el nuestro. Son dos esperas que se suman, y las dos vienen de
+            # fabrica por encima de los 30s:
+            #   max.block.ms       espera de metadata DENTRO de send()   (120s -> 5s)
+            #   delivery.timeout.ms  de ahi sale el sendTimeout del envio sincrono
+            # Peor caso ahora ~20.5s, con margen bajo los 30s. Verificado parando el
+            # broker en caliente: con los valores de fabrica el janitor interrumpia.
+            # Regla de Kafka: delivery.timeout.ms >= request.timeout.ms + linger.ms.
+            max.block.ms: 5000
+            request.timeout.ms: 7000
+            delivery.timeout.ms: 15000
+        # Propiedades extendidas del binder de Kafka. Van bajo spring.cloud.stream.kafka
+        # y no bajo spring.cloud.stream: el ProducerProperties del nucleo no tiene ni
+        # 'sync' ni 'configuration', asi que ahi abajo se ignoran en silencio.
+        bindings:
+          finance-out-0:
+            producer:
+              # Bloquea hasta que el broker confirma, o lanza. Sin esto el binder
+              # publica asincrono: send() vuelve al entregar el registro al productor
+              # y el fallo posterior muere en un callback que nadie lee.
+              sync: true
+              configuration:
+                # La key del registro es el depositId, un String. Sin esto el binder
+                # serializa keys como byte[] y la clave de particion sale mal.
+                key.serializer: org.apache.kafka.common.serialization.StringSerializer
       bindings:
         # El nombre debe coincidir con EventServiceImpl.BINDING: no hay enlace de compilacion.
         finance-out-0:
           destination: vankoo.finance.events.v1 # Un solo topic; se discrimina por el header event-type
           content-type: application/json
-          producer:
-            configuration:
-              # La key del registro es el depositId, un String. Sin esto el binder
-              # serializa keys como byte[] y la clave de particion sale mal.
-              key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 axon:
   axonserver:
