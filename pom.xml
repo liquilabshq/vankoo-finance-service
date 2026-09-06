@@ -135,6 +135,21 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+        <!--
+          Un broker de verdad que la prueba pueda matar ella misma. El test-binder
+          no sirve para esto: no habla con ningun broker, asi que no puede fallar
+          como falla uno. Version gestionada por spring-boot-dependencies.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-stream-binder-kafka</artifactId>
@@ -145,11 +160,6 @@
                     <artifactId>lz4-java</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-stream-test-binder</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
     <dependencyManagement>
