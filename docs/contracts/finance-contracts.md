@@ -709,6 +709,10 @@ hacer a la ligera.
 `key.serializer` al de String. Sin eso la clave de partición sale mal y se pierde
 la garantía de orden por recarga.
 
+> **Corregido en la Tarjeta 49:** ese `key.serializer` estaba bajo
+> `spring.cloud.stream.bindings.finance-out-0.producer.configuration`, y ahí **no
+> se aplicaba**. Ver la sección siguiente.
+
 > **La Tarjeta 8 no trae pruebas automáticas.** Se integran más adelante; no
 > estaban en el alcance de esta entrega. Conviene saber qué queda sin red,
 > porque en esta pieza el coste de un fallo es diferido: Kafka no tiene
@@ -721,10 +725,156 @@ la garantía de orden por recarga.
 > 2. Que `DepositEventPublisher` tenga exactamente tres `@EventHandler`.
 > 3. Que el mensaje llegue al binding con la key puesta y los nueve headers
 >    intactos. `spring-cloud-stream-test-binder` ya está en el `pom` para eso.
+>
+> **Estado tras la Tarjeta 49:** el punto 3 queda cubierto a nivel de unidad por
+> `EventServiceImplTest`, que captura el mensaje y compara key y headers. Los
+> puntos 1 y 2 siguen abiertos: nada comprueba todavía que `correlation-id` salga
+> del `traceId` ni que los `@EventHandler` sean exactamente tres.
 
 La regla es: un evento de dominio público y su evento de integración comparten
 el mismo payload de negocio. No se publican mensajes técnicos de Axon, clases
 serializadas con el nombre completo del paquete ni objetos del SDK de Stripe.
+
+### Detección de fallos de envío (Tarjeta 49)
+
+La Tarjeta 8 publicaba **a ciegas**: `EventServiceImpl` ignoraba el `boolean` de
+`streamBridge.send(...)` y el binding no pedía confirmación, así que el binder
+enviaba asíncrono. `send()` volvía al entregar el registro al productor, no al
+recibir el ack del broker, y el rechazo posterior —timeout, `acks=all` sin
+réplicas suficientes, broker caído— acababa en el `failureChannel` de
+`KafkaProducerMessageHandler`, que con `errorChannelEnabled: false` (el valor por
+defecto) es `null`. El `@EventHandler` terminaba limpio, Axon avanzaba el token
+de `deposit-integration-events` y el desenlace se perdía: exactamente lo
+contrario de lo que promete `EventService`.
+
+**Publicación síncrona, a propósito.** El binding fija `producer.sync: true`, así
+que el binder espera el ack o lanza. `EventServiceImpl` además comprueba el
+`boolean` —un canal puede rechazar el mensaje sin lanzar— y traduce ambos casos a
+`IntegrationEventPublicationException`, con la key y el `event-id` en el mensaje.
+`DepositEventPublisher` no captura nada.
+
+**Lanzar no bastaba.** El `ListenerInvocationErrorHandler` por defecto de Axon es
+`LoggingErrorHandler`: atrapa lo que lance el handler, escribe «failed to handle
+event … Continuing processing with next listener» y devuelve normalmente. El
+procesador ve un lote correcto y avanza el token igual. Medido contra un broker
+real: el token pasó de 12 a 15 con el evento sin publicar. Por eso
+`IntegrationEventProcessorConfiguration` registra un `PropagatingErrorHandler`
+**solo** para este grupo, y con él el token sí se queda quieto.
+
+> **Latente en los otros grupos.** `DepositChargeCreator` y `WalletCreditor`
+> relanzan fallos transitorios documentando que el procesador «deja el token donde
+> estaba». Con el handler por defecto eso hoy **no es cierto** en ninguno de los
+> dos. No se toca aquí porque decidir qué hace un fallo permanente con *sus* colas
+> es de sus tarjetas, pero queda anotado.
+
+**Los timeouts del productor tienen que caber bajo el de Axon.** Axon interrumpe
+un handler que pase de `axon.timeout.handler.events.timeout-ms` (30 s por
+defecto). Dos esperas del productor se suman dentro de `publishEvent` y las dos
+venían de fábrica por encima de ese presupuesto:
+
+| Propiedad | Fábrica | Aquí | Qué acota |
+|---|---:|---:|---|
+| `max.block.ms` | 60 s | 5 s | espera de metadata **dentro** de `send()` |
+| `delivery.timeout.ms` | 120 s | 15 s | de ahí sale el `sendTimeout` del envío síncrono |
+| `request.timeout.ms` | 30 s | 7 s | por la regla `delivery >= request + linger` |
+
+Con los valores de fábrica el janitor de Axon interrumpía el hilo a los 30 s y el
+fallo llegaba como `AxonTimeoutException`, no como el nuestro. Peor caso ahora
+~20,5 s, con margen. Fallar rápido además es lo que se quiere: reintentar es
+trabajo de Axon, no del productor.
+
+**Las propiedades del productor van bajo `spring.cloud.stream.kafka`, no bajo
+`spring.cloud.stream`.** Es el error que esta tarjeta destapó y merece quedar
+escrito, porque no avisa de nada:
+
+| Propiedad | Dónde va | Dónde estaba |
+|---|---|---|
+| `destination`, `content-type` | `spring.cloud.stream.bindings.finance-out-0` | igual |
+| `sync`, `configuration.key.serializer` | `spring.cloud.stream.kafka.bindings.finance-out-0.producer` | `spring.cloud.stream.bindings.finance-out-0.producer` |
+
+`spring.cloud.stream.bindings.<name>.producer` enlaza contra el
+`ProducerProperties` del núcleo, que no tiene `sync` ni `configuration`; los dos
+son de `KafkaProducerProperties`, anotada
+`@ConfigurationProperties("spring.cloud.stream.kafka")`. Lo que cae en el
+namespace equivocado **se ignora en silencio** —`BindingHandlerAdvise` solo mapea
+hacia `spring.cloud.stream.default`, nunca al del binder—, así que el
+`key.serializer` de String nunca llegó a aplicarse.
+
+> **La consecuencia era peor que una key mal particionada.** Verificado contra un
+> broker real con la configuración anterior: `key.serializer` valía
+> `ByteArraySerializer` y el envío moría en
+> `SerializationException: Can't convert key of class java.lang.String`. Es decir,
+> **nunca salió un solo desenlace al topic**. No se notó porque Kafka no tiene
+> consumidor y porque no había pruebas de integración.
+
+**El grupo propio es lo que hace tolerable el bloqueo.** Mientras Kafka esté
+caído, este token se queda atrás reintentando; `wallet-crediting` sigue
+acreditando. Medido durante una caída provocada: `deposit-integration-events` se
+quedó en 18 y `wallet-crediting` llegó a 21. Al volver el broker, el desenlace
+pendiente se publicó solo en el siguiente reintento, sin reiniciar el servicio.
+
+**Reintento indefinido, sin dead-letter.** Todo fallo de publicación se trata como
+transitorio; no existe la rama permanente que `DepositChargeCreator` sí tiene. Es
+lo correcto mientras no haya DLT, y es la razón de que el dead-letter siga en
+«Decisiones pendientes».
+
+**Piezas nuevas:**
+
+| Pieza | Clase / archivo |
+|---|---|
+| Excepción del puerto | `domain/exceptions/IntegrationEventPublicationException` |
+| Propagación del fallo al token | `infrastructure/configuration/IntegrationEventProcessorConfiguration` |
+| `sync`, `key.serializer`, timeouts | `application-dev.yaml`, `application-docker.yaml` |
+| Broker real para las pruebas | `testcontainers-junit-jupiter` y `testcontainers-kafka` en el `pom`, versión gestionada por Spring Boot |
+
+**Pruebas:**
+
+| Prueba | Qué fija | Infra |
+|---|---|---|
+| `EventServiceImplTest` | envío confirmado, canal que rechaza, broker que falla, key y headers intactos | ninguna (`StreamBridge` mockeado) |
+| `DepositEventPublisherTest` | la excepción escapa de los tres `@EventHandler` | ninguna (`EventService` mockeado) |
+| `KafkaOutageIntegrationTest` | **el criterio de aceptación**: broker real que deja de responder a mitad de vuelo | Docker (Testcontainers) |
+
+**`KafkaOutageIntegrationTest` corre contra la configuración real** del perfil
+`dev` (`@ActiveProfiles("dev")`), sobrescribiendo únicamente la dirección del
+broker. Es deliberado: lo que se rompió aquí fue configuración —el `sync`, el
+namespace donde vive y los timeouts del productor—, así que un test que declarase
+su propio binding pasaría mientras producción seguía rota. Verificado como control
+negativo: con `sync: false` y **nada más** cambiado, el test falla con «returning
+normally is the silent loss».
+
+Dos decisiones suyas que conviene no deshacer:
+
+- **El broker muere a mitad de vuelo, no está caído desde el principio.** Un
+  broker que nunca estuvo es otro fallo: el productor no consigue metadata y
+  `send()` lanza por `max.block.ms`, cosa que el código viejo también habría
+  visto. La pérdida silenciosa necesita un productor que ya tiene metadata,
+  acepta el registro en su buffer y falla después. Por eso publica una vez bien
+  antes de quitar el broker.
+- **Pausa el contenedor, no lo para.** Pausar congela el broker conservando el
+  puerto publicado, que es lo que permite probar también la recuperación; un
+  contenedor parado volvería en otro puerto. Además modela la caída más honesta:
+  un broker que sigue ahí y ya no contesta.
+
+Levanta solo Kafka. Que el token de Axon aguante es comportamiento del procesador,
+no del puerto, y sigue cubierto por el procedimiento manual de abajo — automatizarlo
+costaría Postgres y Axon Server en el mismo test.
+
+**Cómo reproducir la caída a mano.** Cubre la mitad que el test no llega a ver: el
+token. Con `finance-db-postgres`, `axon-server` y `kafka-broker` arriba:
+
+1. Publicar un desenlace con el broker vivo, **para que el productor tenga
+   metadata**. Sin este paso el broker está caído desde el principio, `send()`
+   muere buscando metadata y no se reproduce el escenario real.
+2. `docker stop kafka-broker`.
+3. Publicar otro desenlace. En el log: `IntegrationEventPublicationException`, y
+   **no** aparece `Published integration event`.
+4. Comprobar que el token no se movió:
+   `select processor_name, convert_from(lo_get(token),'UTF8') from token_entries` —
+   la tabla se llama `token_entries`, en plural, por la estrategia de nombres.
+5. `docker start kafka-broker`. El evento sale solo en el siguiente reintento.
+6. Contar en el topic: el desenlace está, y at-least-once permite que esté más de
+   una vez. Lo que no puede es faltar.
 
 ### Topic y clave
 
@@ -754,6 +904,12 @@ Los metadatos técnicos viajan en headers, no dentro del objeto de dominio:
 El `event-id` debe conservarse durante los reintentos del productor. Los
 consumidores deben deduplicar por `event-id` o por una clave de negocio
 equivalente.
+
+> **Spring añade dos headers que no son del contrato.** Visto en el topic real:
+> `contentType` (camelCase, duplicando `content-type`) y
+> `spring_json_header_types`, un JSON con los tipos Java de cada header. Ninguno
+> rompe nada, pero filtran plomería de Spring a un contrato público y un consumidor
+> externo los verá. Sin decidir todavía si se suprimen.
 
 #### De dónde sale cada header (Tarjeta 8)
 
@@ -1274,7 +1430,11 @@ negocio.
   cuenta de Vankoo, y con qué método de pago en cada caso.
 - Definir los límites de tamaño para descripción e identificadores externos.
 - Definir el formato de errores HTTP común de Vankoo.
-- Definir la política de retención y el dead-letter de Kafka.
+- Definir la política de retención y el dead-letter de Kafka. **Más urgente desde
+  la Tarjeta 49:** ahora que la publicación es síncrona y todo fallo se propaga,
+  un evento que el broker nunca acepte reintenta para siempre y bloquea el token
+  de `deposit-integration-events` detrás de él. Es preferible a perderlo en
+  silencio, pero un DLT es la salida que falta.
 - ~~Definir la política de retención del payload crudo en el inbox de webhooks.~~
   → **resuelto en la Tarjeta 7: no se retiene.** `payload_ref` guarda el SHA-256
   del cuerpo, no el cuerpo. Queda abierto, en cambio, **qué hacer con las filas
@@ -1294,6 +1454,14 @@ negocio.
   deliberadamente fuera de su alcance (es una pieza separada: nuevo event
   handler, manejo de `PaymentProviderException`/reintentos). Tarjeta nueva en
   Trello, sin dueño.
+- **`DepositChargeCreator` y `WalletCreditor` no reintentan como dicen que lo
+  hacen.** Los dos relanzan fallos transitorios documentando que el procesador
+  «deja el token donde estaba», pero el `ListenerInvocationErrorHandler` por
+  defecto de Axon es `LoggingErrorHandler`: atrapa la excepción, la registra y
+  deja avanzar el token igual. Descubierto al verificar la Tarjeta 49, que lo
+  resuelve **solo** para `deposit-integration-events` registrando un
+  `PropagatingErrorHandler` en ese grupo. Para los otros dos hay que decidir antes
+  qué le hace un fallo permanente a su cola, y eso es de sus dueños.
 - **Diseñar el contrato del agregado `Wallet`/`Ledger`**, segundo agregado de
   este mismo bounded context, que consumirá `DepositSucceededEvent` por el event
   bus de Axon y acreditará el saldo. Es el siguiente contrato, no un pendiente
