@@ -26,6 +26,20 @@ import org.springframework.stereotype.Component;
  * balances. Sharing a group would let the broker hold up the business, which is
  * the opposite of what publishing-without-a-consumer is worth.
  *
+ * <p><strong>It catches nothing, on purpose.</strong> A publication failure has
+ * to escape {@code on(...)} for the token to stay put, which is the whole of
+ * what keeps an outcome from being lost. That makes it the deliberate opposite
+ * of {@code DepositChargeCreator}, which sorts transient failures from permanent
+ * ones and swallows the second kind: there, a permanent failure would block its
+ * group forever over an event that can never succeed; here every failure is a
+ * broker that is not answering <em>yet</em>. Adding a {@code try/catch} for
+ * symmetry with that class would undo this.
+ *
+ * <p>Not catching is necessary but not sufficient: Axon's default
+ * {@code LoggingErrorHandler} would catch it for us and let the token advance
+ * anyway. {@code IntegrationEventProcessorConfiguration} registers a
+ * {@code PropagatingErrorHandler} for this group so that it does not.
+ *
  * <p><strong>Careful with token resets.</strong> Resetting this group's token
  * republishes every outcome ever recorded. That is at-least-once working as
  * designed, and the reason the contract makes consumers deduplicate by
