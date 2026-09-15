@@ -5,7 +5,7 @@ import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
 /**
- * Body of {@code POST /v1/deposits}. The {@code Idempotency-Key} travels as an
+ * Body of {@code POST /api/v1/deposits}. The {@code Idempotency-Key} travels as an
  * HTTP header, not here — see
  * {@code CreateDepositCommandFromResourceAssembler}.
  *

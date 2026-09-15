@@ -156,8 +156,8 @@ con que cada `Wallet` ya vive scoped a `(accountId, currency)`. El cliente
 siempre especifica la moneda.
 
 ```text
-GET /v1/accounts/{accountId}/wallets/{currency}            -> saldo
-GET /v1/accounts/{accountId}/wallets/{currency}/movements  -> historial paginado
+GET /api/v1/accounts/{accountId}/wallets/{currency}            -> saldo
+GET /api/v1/accounts/{accountId}/wallets/{currency}/movements  -> historial paginado
 ```
 
 **`getWalletBalance` responde `404`** cuando el wallet no existe todavía —

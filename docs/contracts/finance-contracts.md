@@ -1105,12 +1105,12 @@ Gateway:
 
 | Método | Ruta lógica | Resultado |
 |---|---|---|
-| `POST` | `/v1/deposits` | Acepta `InitiateDepositCommand`; requiere header `Idempotency-Key`. |
-| `GET` | `/v1/deposits/{depositId}` | Devuelve el estado proyectado de la recarga. |
-| `GET` | `/v1/accounts/{accountId}/deposits` | Lista paginada de recargas del monedero. |
-| `POST` | `/v1/payment-providers/{provider}/webhooks` | Verifica el webhook y lo deposita en el inbox. |
+| `POST` | `/api/v1/deposits` | Acepta `InitiateDepositCommand`; requiere header `Idempotency-Key`. |
+| `GET` | `/api/v1/deposits/{depositId}` | Devuelve el estado proyectado de la recarga. |
+| `GET` | `/api/v1/accounts/{accountId}/deposits` | Lista paginada de recargas del monedero. |
+| `POST` | `/api/v1/payment-providers/{provider}/webhooks` | Verifica el webhook y lo deposita en el inbox. |
 
-`POST /v1/deposits` responde `202 Accepted` con `depositId` y estado `PENDING`.
+`POST /api/v1/deposits` responde `202 Accepted` con `depositId` y estado `PENDING`.
 La creación del recurso externo y la actualización del Read Model son asíncronas.
 
 **Los tres primeros están implementados desde la Tarjeta 4**, en
@@ -1213,8 +1213,8 @@ Equivalencias y reglas de dependencia:
   devuelve `DepositSummary`, no `Deposit`: las consultas leen el read model y
   nunca rehidratan el agregado.
 - **Convención de nombres de resources HTTP:** `CreateXResource` para el request,
-  `XResource` para el response. Así, `POST /v1/deposits` recibe un
-  `CreateDepositResource` y `GET /v1/deposits/{id}` devuelve un `DepositResource`.
+  `XResource` para el response. Así, `POST /api/v1/deposits` recibe un
+  `CreateDepositResource` y `GET /api/v1/deposits/{id}` devuelve un `DepositResource`.
 - **No hay interfaz de repositorio en el dominio**, a diferencia del modelo de
   referencia. El agregado es event-sourced y no se carga de una tabla, y el read
   model no es un concepto de dominio: su acceso JPA vive en
@@ -1448,7 +1448,7 @@ negocio.
 - **Nada dispara todavía la creación del cargo en Stripe tras
   `DepositInitiatedEvent`.** La Tarjeta 4 entrega la capa REST completa —un
   cliente puede iniciar y consultar una recarga— pero un depósito creado por
-  `POST /v1/deposits` se queda en `PENDING` para siempre: ningún
+  `POST /api/v1/deposits` se queda en `PENDING` para siempre: ningún
   `@EventHandler` reacciona a `DepositInitiatedEvent` para llamar a
   `PaymentProvider.createDeposit`. Detectado al implementar la Tarjeta 4,
   deliberadamente fuera de su alcance (es una pieza separada: nuevo event

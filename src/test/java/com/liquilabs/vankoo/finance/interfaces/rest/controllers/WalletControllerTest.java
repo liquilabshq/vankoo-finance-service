@@ -48,7 +48,7 @@ class WalletControllerTest {
     void getWalletBalance_found_respondsOk() throws Exception {
         when(walletQueryService.getWalletBalance(any())).thenReturn(Optional.of(balance()));
 
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "PEN"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "PEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accountId", is(ACCOUNT_ID)))
                 .andExpect(jsonPath("$.balanceMinor", is(12500)));
@@ -58,19 +58,19 @@ class WalletControllerTest {
     void getWalletBalance_notFound_respondsNotFound() throws Exception {
         when(walletQueryService.getWalletBalance(any())).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "PEN"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "PEN"))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void getWalletBalance_malformedAccountId_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}", "not-a-uuid", "PEN"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}", "not-a-uuid", "PEN"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void getWalletBalance_unsupportedCurrency_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "EUR"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}", ACCOUNT_ID, "EUR"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -82,7 +82,7 @@ class WalletControllerTest {
         when(walletQueryService.listWalletMovements(any()))
                 .thenReturn(new WalletMovementPage(List.of(movement), 0, 20, 1L));
 
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements", is(1)))
                 .andExpect(jsonPath("$.items[0].type", is("RECARGA")));
@@ -93,21 +93,21 @@ class WalletControllerTest {
         when(walletQueryService.listWalletMovements(any()))
                 .thenReturn(new WalletMovementPage(List.of(), 0, 20, 0L));
 
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items.length()", is(0)));
     }
 
     @Test
     void listWalletMovements_negativePage_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN")
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN")
                         .param("page", "-1"))
                 .andExpect(status().isBadRequest());
     }
 
     @Test
     void listWalletMovements_nonPositiveSize_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN")
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN")
                         .param("size", "0"))
                 .andExpect(status().isBadRequest());
     }

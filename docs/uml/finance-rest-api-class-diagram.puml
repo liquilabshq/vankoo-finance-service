@@ -263,7 +263,7 @@ legend bottom
   the intent, and DepositSummary is the query answer. The resource never reaches
   the domain and the aggregate never reaches the API.
 
-  POST /v1/deposits answers 202 Accepted with the depositId in PENDING: the
+  POST /api/v1/deposits answers 202 Accepted with the depositId in PENDING: the
   provider call and the projection update happen afterwards. Nothing triggers
   that provider call yet (Card 8 gap, tracked separately) — a deposit created
   through this endpoint stays PENDING today.

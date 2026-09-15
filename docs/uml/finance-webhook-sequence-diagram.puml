@@ -23,7 +23,7 @@ database "Axon Server\nEvent Store" as store
 
 == Synchronous: verify, record, acknowledge ==
 
-stripe -> ctrl : POST /v1/payment-providers/stripe/webhooks\nraw payload + signature header
+stripe -> ctrl : POST /api/v1/payment-providers/stripe/webhooks\nraw payload + signature header
 activate ctrl
 
 ctrl -> provider : verifyWebhook(rawPayload, signature)

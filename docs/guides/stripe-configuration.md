@@ -148,10 +148,10 @@ STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... sh ./mvnw spring-b
 ## El endpoint de webhooks
 
 ```
-POST /v1/payment-providers/stripe/webhooks
+POST /api/v1/payment-providers/stripe/webhooks
 ```
 
-En local, con el perfil `dev`, eso es `http://localhost:8083/v1/payment-providers/stripe/webhooks`.
+En local, con el perfil `dev`, eso es `http://localhost:8083/api/v1/payment-providers/stripe/webhooks`.
 
 ### Eventos a los que suscribirse
 
@@ -176,7 +176,7 @@ Checkout Session. No resolverían ningún depósito.
 
 ```bash
 stripe login
-stripe listen --forward-to localhost:8083/v1/payment-providers/stripe/webhooks
+stripe listen --forward-to localhost:8083/api/v1/payment-providers/stripe/webhooks
 ```
 
 `stripe listen` imprime al arrancar el `whsec_...` que debes poner en

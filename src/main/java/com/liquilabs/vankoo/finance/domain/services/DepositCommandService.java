@@ -4,7 +4,7 @@ import com.liquilabs.vankoo.finance.domain.model.commands.InitiateDepositCommand
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 
 /**
- * The write use case behind {@code POST /v1/deposits}. Declared here because
+ * The write use case behind {@code POST /api/v1/deposits}. Declared here because
  * the domain states what the use cases are; the application layer wires it to
  * {@code CommandGateway} and to the idempotency barrier. The implementation is
  * {@code application.internal.commandservices.DepositCommandServiceImpl}.
