@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
-/** JPA access to the {@code POST /v1/deposits} idempotency barrier. */
+/** JPA access to the {@code POST /api/v1/deposits} idempotency barrier. */
 @Repository
 public interface DepositCommandIdempotencyRepository extends JpaRepository<DepositCommandIdempotency, UUID> {
 

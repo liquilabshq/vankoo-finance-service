@@ -44,7 +44,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code application}.
  */
 @RestController
-@RequestMapping(value = "/v1/payment-providers/stripe/webhooks", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequestMapping(value = "/api/v1/payment-providers/stripe/webhooks", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Provider Webhooks", description = "Callbacks from payment providers. Not part of the Vankoo API.")
 public class StripeWebhookController {
 

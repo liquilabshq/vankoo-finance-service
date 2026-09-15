@@ -50,7 +50,7 @@ queue "Event Processors\n(projection + publisher)" as processors
 uc1 -[hidden]down-> uc2
 
 ' ---------- use case 1 ----------
-investor --> api1 : POST /v1/deposits
+investor --> api1 : POST /api/v1/deposits
 api1 --> svc1 : InitiateDepositCommand
 svc1 --> agg1 : creates
 agg1 --> ev1 : produces

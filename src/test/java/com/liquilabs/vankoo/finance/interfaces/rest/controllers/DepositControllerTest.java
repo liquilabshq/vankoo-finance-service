@@ -61,7 +61,7 @@ class DepositControllerTest {
             return command.depositId();
         });
 
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
@@ -78,7 +78,7 @@ class DepositControllerTest {
         when(depositCommandService.handle(any())).thenReturn(existingId);
         when(depositQueryService.getDepositById(any())).thenReturn(Optional.of(summaryWithStatus(existingId, DepositStatus.SUCCEEDED)));
 
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
@@ -90,7 +90,7 @@ class DepositControllerTest {
     void createDeposit_invalidAmount_respondsBadRequest() throws Exception {
         when(depositCommandService.handle(any())).thenThrow(new InvalidDepositAmountException(-1));
 
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
@@ -109,7 +109,7 @@ class DepositControllerTest {
             put("description", "Recarga de saldo");
         }});
 
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(body))
@@ -122,7 +122,7 @@ class DepositControllerTest {
     void createDeposit_conflictingIdempotencyKey_respondsConflict() throws Exception {
         when(depositCommandService.handle(any())).thenThrow(new IdempotencyKeyConflictException("conflict"));
 
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
@@ -131,7 +131,7 @@ class DepositControllerTest {
 
     @Test
     void createDeposit_missingIdempotencyKeyHeader_respondsBadRequest() throws Exception {
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .contentType("application/json")
                         .content(createDepositBody()))
                 .andExpect(status().isBadRequest());
@@ -139,7 +139,7 @@ class DepositControllerTest {
 
     @Test
     void createDeposit_blankBody_respondsBadRequest() throws Exception {
-        mockMvc.perform(post("/v1/deposits")
+        mockMvc.perform(post("/api/v1/deposits")
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content("{}"))
@@ -152,7 +152,7 @@ class DepositControllerTest {
         when(depositQueryService.getDepositById(any()))
                 .thenReturn(Optional.of(summaryWithStatus(depositId, DepositStatus.PENDING)));
 
-        mockMvc.perform(get("/v1/deposits/{depositId}", depositId.toString()))
+        mockMvc.perform(get("/api/v1/deposits/{depositId}", depositId.toString()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.depositId", is(depositId.toString())));
     }
@@ -161,13 +161,13 @@ class DepositControllerTest {
     void getDeposit_notFound_respondsNotFound() throws Exception {
         when(depositQueryService.getDepositById(any())).thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/v1/deposits/{depositId}", new DepositId().toString()))
+        mockMvc.perform(get("/api/v1/deposits/{depositId}", new DepositId().toString()))
                 .andExpect(status().isNotFound());
     }
 
     @Test
     void getDeposit_malformedId_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/deposits/{depositId}", "not-a-uuid"))
+        mockMvc.perform(get("/api/v1/deposits/{depositId}", "not-a-uuid"))
                 .andExpect(status().isBadRequest());
     }
 
@@ -177,7 +177,7 @@ class DepositControllerTest {
         when(depositQueryService.listDepositsByAccount(any()))
                 .thenReturn(new DepositSummaryPage(java.util.List.of(summary), 0, 20, 1L));
 
-        mockMvc.perform(get("/v1/accounts/{accountId}/deposits", ACCOUNT_ID))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements", is(1)))
                 .andExpect(jsonPath("$.items[0].status", is("SUCCEEDED")));
@@ -185,7 +185,7 @@ class DepositControllerTest {
 
     @Test
     void listDeposits_negativePage_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/v1/accounts/{accountId}/deposits", ACCOUNT_ID).param("page", "-1"))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID).param("page", "-1"))
                 .andExpect(status().isBadRequest());
     }
 

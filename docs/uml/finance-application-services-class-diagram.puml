@@ -222,7 +222,7 @@ note bottom of DepositCommandServiceImpl
   It does not call PaymentProvider either: nothing
   reacts to DepositInitiatedEvent yet to create the
   charge, so a deposit created through POST
-  /v1/deposits stays PENDING. Tracked separately in
+  /api/v1/deposits stays PENDING. Tracked separately in
   Trello, not this card's scope.
 end note
 

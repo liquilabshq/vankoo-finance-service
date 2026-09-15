@@ -40,7 +40,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code listDeposits} never 404s for an account with zero deposits.
  */
 @RestController
-@RequestMapping(value = "/v1", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequestMapping(value = "/api/v1", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Wallets", description = "Query an investor's wallet balance and movement history.")
 public class WalletController {
 

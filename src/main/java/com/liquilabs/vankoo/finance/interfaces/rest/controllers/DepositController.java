@@ -49,7 +49,7 @@ import org.springframework.web.bind.annotation.RestController;
  * inline, per exception, with no response body.
  */
 @RestController
-@RequestMapping(value = "/v1", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequestMapping(value = "/api/v1", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Deposits", description = "Initiate and query an investor's top-ups.")
 public class DepositController {
 

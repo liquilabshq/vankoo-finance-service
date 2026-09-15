@@ -17,7 +17,7 @@ import java.util.UUID;
 
 /**
  * One row per {@code (accountId, idempotencyKey)} ever admitted by
- * {@code POST /v1/deposits}. Maps
+ * {@code POST /api/v1/deposits}. Maps
  * {@code finance_ops.deposit_command_idempotencies} — the barrier
  * {@code DepositCommandServiceImpl} checks before dispatching
  * {@code InitiateDepositCommand}.
