@@ -1,0 +1,18 @@
+# Lo que NO viaja al contexto de build de Docker.
+#
+# El Dockerfile solo hace COPY de pom.xml y src, así que hoy nada más entra en la
+# imagen. Esta lista existe para que eso siga siendo verdad aunque alguien cambie
+# el Dockerfile a un COPY . . — sobre todo por config/, que lleva
+# application-local.yaml con la clave de Stripe y la contraseña de la BD.
+config/
+target/
+.git/
+.idea/
+.mvn/
+mvnw
+mvnw.cmd
+docs/
+AGENTS.md
+*.iml
+.env
+.env.local
