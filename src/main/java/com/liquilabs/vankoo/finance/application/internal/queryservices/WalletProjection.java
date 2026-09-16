@@ -10,6 +10,7 @@ import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovement;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovementPage;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Money;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.MovementDirection;
@@ -106,9 +107,14 @@ public class WalletProjection implements WalletQueryService {
                 WalletMovementKind.RECARGA.name(),
                 MovementDirection.CREDIT.name(),
                 DepositId.of(event.sourceDepositId()).value(),
+                null,
                 occurredAt);
     }
 
+    /**
+     * {@code debitId} is nullable on the event on purpose — debits stored
+     * before the field existed carry none — so it is projected as-is.
+     */
     @EventHandler
     public void on(WalletDebitedEvent event, @MessageIdentifier String eventId, @Timestamp Instant occurredAt) {
         WalletViewEntity row = loadRow(event.walletId(), eventId);
@@ -128,6 +134,7 @@ public class WalletProjection implements WalletQueryService {
                 WalletMovementKind.valueOf(event.reason()).name(),
                 MovementDirection.DEBIT.name(),
                 null,
+                event.debitId() == null ? null : DebitId.of(event.debitId()).value(),
                 occurredAt);
     }
 
@@ -178,6 +185,7 @@ public class WalletProjection implements WalletQueryService {
                 entity.getDirection(),
                 new Money(entity.getAmountMinor(), entity.getCurrency()),
                 entity.getSourceDepositId(),
+                entity.getDebitId(),
                 entity.getOccurredAt());
     }
 }

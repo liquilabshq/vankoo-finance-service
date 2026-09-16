@@ -2,11 +2,13 @@ package com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.entities;
 
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.MovementDirection;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletMovementKind;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.AccountIdConverter;
+import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.DebitIdConverter;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.DepositIdConverter;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.WalletIdConverter;
 import jakarta.persistence.Column;
@@ -80,6 +82,14 @@ public class WalletMovementEntity {
     /** Set only when {@link #type} is {@code RECARGA}. */
     @Convert(converter = DepositIdConverter.class)
     private DepositId sourceDepositId;
+
+    /**
+     * Set only for debits, and only those whose {@code WalletDebitedEvent}
+     * carried a {@code debitId} — {@code null} for credits and for debits
+     * stored before that field existed.
+     */
+    @Convert(converter = DebitIdConverter.class)
+    private DebitId debitId;
 
     @Column(nullable = false)
     private Instant occurredAt;

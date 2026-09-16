@@ -47,7 +47,9 @@ package sits at the first level.
 ```
 com.liquilabs.vankoo.finance
 ├── interfaces/
-│   ├── rest/{controllers, webhooks, resources, transform}
+│   ├── rest/{controllers, webhooks, resources, transform,
+│   │         problems,               # problem+json: FinanceProblem + the advice
+│   │         interceptors}           # X-User-Id ownership guard
 │   └── messaging/eventhandlers      # events from OTHER bounded contexts (empty in v1)
 ├── application/internal/{commandservices, queryservices, outboundservices,
 │                          eventhandlers}   # handlers of OUR OWN events that are
@@ -110,6 +112,20 @@ fail**, never silently convert.
 `DepositProcessing`. No `Axon`, `Kafka`, `Stripe` or `Postgres` in an event name.
 
 **HTTP resources:** `CreateXResource` for a request, `XResource` for a response.
+
+**HTTP errors are `application/problem+json` with a `code`, rendered by one
+`@RestControllerAdvice`.** Controllers throw (or let Spring throw) and
+`interfaces/rest/problems/FinanceExceptionHandler` answers; `FinanceProblem` is
+the catalogue, kebab-case codes, same `type` prefix as the gateway and IAM. Do
+not `return ResponseEntity.badRequest().build()` from a controller any more —
+that was the pre-Card-55 style and the mobile app now reads `code`.
+
+**Every route under `/api/v1/accounts/{accountId}/**` is owner-only.**
+`CallerOwnershipInterceptor` (registered by `WebMvcConfiguration`) compares
+the gateway-injected `X-User-Id` with `{accountId}` and answers
+`403 forbidden` when it is missing or different, for reads as much as writes.
+New account-scoped endpoints get this for free; `@WebMvcTest` slices pick it
+up too, so controller tests must send the header.
 
 **Validation goes in the compact constructor of a record.** See
 `VerifiedProviderDepositUpdate`, which rejects a missing `providerEventId`
@@ -179,6 +195,21 @@ public class Deposit {
 ```
 
 Commands carry `@TargetAggregateIdentifier` on `depositId` for routing.
+
+**An exception thrown by a `@CommandHandler` does not reach `sendAndWait` as
+itself.** The command bus is `AxonServerCommandBus`, so every command goes out
+to Axon Server and back even when the handler is in this JVM; the connector
+serializes only a code and a message, and the dispatcher gets a generic
+`CommandExecutionException`. A `catch (InsufficientBalanceException e)` around
+`sendAndWait` never fires in a running service. What does survive the trip is
+the `details` of a `CommandExecutionException` thrown on the handler side, so
+Card 55 added `CommandRejectionHandlerInterceptor` (registered by
+`CommandBusConfiguration`): it rewraps the domain exceptions it knows with a
+`CommandRejection(code, message)`, `WalletCommandServiceImpl` turns that into
+`CommandRejectedException`, and `FinanceExceptionHandler` maps the `code`. The
+aggregate keeps throwing plain domain exceptions and its fixture tests are
+untouched. When you add a new rejection, add it to the interceptor, or it will
+be a 500.
 
 **Projections must declare `@ProcessingGroup("deposit-read-model")` explicitly.**
 The default group name is the handler's package name and it is written into the
@@ -322,6 +353,17 @@ One thing Card 7 leaves open on purpose:
 
 - **Exhausted `PARKED` rows and `DISCARDED` rows have no owner.** They log an
   `error` and stay in the table. No alerting, no reprocessing tool.
+
+Card 55 added `WalletCommandService` and the first client-facing write on
+`Wallet`: `POST /api/v1/accounts/{accountId}/wallets/{currency}/debits`, an
+`Idempotency-Key` barrier calqued from the deposit one
+(`finance_ops.wallet_debit_command_idempotencies`, V7), a `DebitId` that now
+travels in `DebitWalletCommand` and as a nullable last field of
+`WalletDebitedEvent` (V8 projects it to `wallet_movements.debit_id`), the
+`X-User-Id` guard and the problem+json advice described above. Both
+`docs/contracts/*.md` record the resulting contract. Investment never sends a
+debit command: the mobile app debits first and hands Investment the `debitId`
+as `transactionId`.
 
 Card 4 added `DepositCommandService`, but only `handle(InitiateDepositCommand)`
 — what the REST layer needs, not what the webhook inbox needs. The inbox still

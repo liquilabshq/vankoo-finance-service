@@ -1,8 +1,6 @@
 package com.liquilabs.vankoo.finance.interfaces.rest.controllers;
 
-import com.liquilabs.vankoo.finance.domain.exceptions.IdempotencyKeyConflictException;
-import com.liquilabs.vankoo.finance.domain.exceptions.InvalidDepositAmountException;
-import com.liquilabs.vankoo.finance.domain.exceptions.UnsupportedCurrencyException;
+import com.liquilabs.vankoo.finance.domain.exceptions.DepositNotFoundException;
 import com.liquilabs.vankoo.finance.domain.model.commands.InitiateDepositCommand;
 import com.liquilabs.vankoo.finance.domain.model.queries.DepositSummaryPage;
 import com.liquilabs.vankoo.finance.domain.model.queries.GetDepositByIdQuery;
@@ -43,10 +41,10 @@ import org.springframework.web.bind.annotation.RestController;
  * delegates to {@link DepositCommandService}/{@link DepositQueryService}, and
  * translates the answer back. It never touches a repository or Axon directly.
  *
- * <p>No {@code @RestControllerAdvice} exists anywhere in this codebase, and
- * the common HTTP error format for Vankoo is still an open decision in the
- * contract — so, like {@code StripeWebhookController}, errors are mapped
- * inline, per exception, with no response body.
+ * <p>Errors are not mapped here: the controller throws (or lets Spring throw)
+ * and {@code FinanceExceptionHandler} answers {@code application/problem+json}
+ * with a {@code code}. {@code listDeposits} is under {@code /accounts/**}, so
+ * {@code CallerOwnershipInterceptor} guards it like every wallet route.
  */
 @RestController
 @RequestMapping(value = "/api/v1", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -74,21 +72,9 @@ public class DepositController {
     public ResponseEntity<DepositResource> createDeposit(
             @RequestHeader("Idempotency-Key") String idempotencyKey,
             @Valid @RequestBody CreateDepositResource resource) {
-        InitiateDepositCommand command;
-        try {
-            command = CreateDepositCommandFromResourceAssembler.toCommandFromResource(resource, idempotencyKey);
-        } catch (IllegalArgumentException | UnsupportedCurrencyException exception) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        DepositId resolvedId;
-        try {
-            resolvedId = depositCommandService.handle(command);
-        } catch (InvalidDepositAmountException exception) {
-            return ResponseEntity.badRequest().build();
-        } catch (IdempotencyKeyConflictException exception) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
-        }
+        InitiateDepositCommand command =
+                CreateDepositCommandFromResourceAssembler.toCommandFromResource(resource, idempotencyKey);
+        DepositId resolvedId = depositCommandService.handle(command);
 
         if (resolvedId.equals(command.depositId())) {
             // First time this key was seen: the projection may not have caught
@@ -114,36 +100,27 @@ public class DepositController {
             @ApiResponse(responseCode = "404", description = "No deposit with that id")
     })
     public ResponseEntity<DepositResource> getDeposit(@PathVariable String depositId) {
-        DepositId id;
-        try {
-            id = DepositId.of(depositId);
-        } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().build();
-        }
+        DepositId id = DepositId.of(depositId);
 
         return depositQueryService.getDepositById(new GetDepositByIdQuery(id))
                 .map(summary -> ResponseEntity.ok(DepositResourceFromSummaryAssembler.toResourceFromSummary(summary)))
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElseThrow(() -> new DepositNotFoundException(depositId));
     }
 
     @GetMapping("/accounts/{accountId}/deposits")
     @Operation(summary = "List an account's deposits, paginated")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "A page, possibly empty"),
-            @ApiResponse(responseCode = "400", description = "accountId is not a valid identifier, or page/size is invalid")
+            @ApiResponse(responseCode = "400", description = "accountId is not a valid identifier, or page/size is invalid"),
+            @ApiResponse(responseCode = "403", description = "X-User-Id does not match accountId")
     })
     public ResponseEntity<DepositSummaryPageResource> listDeposits(
             @PathVariable String accountId,
             @Parameter(description = "0-based") @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        AccountId id;
-        try {
-            id = AccountId.of(accountId);
-        } catch (IllegalArgumentException exception) {
-            return ResponseEntity.badRequest().build();
-        }
+        AccountId id = AccountId.of(accountId);
         if (page < 0 || size <= 0) {
-            return ResponseEntity.badRequest().build();
+            throw new IllegalArgumentException("page must be >= 0 and size must be > 0");
         }
 
         DepositSummaryPage result =

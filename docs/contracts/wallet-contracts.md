@@ -138,7 +138,7 @@ Además de la recarga (crédito, ya cubierto arriba), `Wallet` reconoce:
 | Movimiento | Efecto | Origen |
 |---|---|---|
 | Recarga (`Deposit` exitoso) | Crédito | `DepositSucceededEvent` (interno) |
-| Inversión | Débito | comando del bounded context Investment (por definir su contrato) |
+| Inversión | Débito | `DebitWalletCommand`, despachado por `POST /api/v1/accounts/{accountId}/wallets/{currency}/debits` a pedido del propio inversionista (ver «Débito por REST» abajo) |
 | Retiro | Débito | comando propio de `Wallet` |
 | Comisión | Débito | comando propio de `Wallet` |
 | Reverso | Crédito o débito compensatorio | corrige un movimiento previo ya aplicado (ej. chargeback de Stripe sobre una recarga ya acreditada) |
@@ -156,12 +156,13 @@ con que cada `Wallet` ya vive scoped a `(accountId, currency)`. El cliente
 siempre especifica la moneda.
 
 ```text
-GET /api/v1/accounts/{accountId}/wallets/{currency}            -> saldo
-GET /api/v1/accounts/{accountId}/wallets/{currency}/movements  -> historial paginado
+GET  /api/v1/accounts/{accountId}/wallets/{currency}            -> saldo
+GET  /api/v1/accounts/{accountId}/wallets/{currency}/movements  -> historial paginado
+POST /api/v1/accounts/{accountId}/wallets/{currency}/debits     -> débito (escritura, ver abajo)
 ```
 
-**`getWalletBalance` responde `404`** cuando el wallet no existe todavía —
-caso normal dado que se abre perezosamente, no un error. **`listWalletMovements`
+**`getWalletBalance` responde `404 wallet-not-found`** cuando el wallet no
+existe todavía — caso normal dado que se abre perezosamente, no un error. **`listWalletMovements`
 nunca responde `404`**: una cuenta sin wallet en esa moneda recibe `200` con
 página vacía, simétrico con `listDeposits`, que tampoco falla para una cuenta
 sin depósitos. El primero direcciona un recurso puntual; el segundo, una
@@ -198,7 +199,80 @@ primero solo repite lógica sin necesidad. `WalletProjection` deriva el
 
 ---
 
+## Débito por REST (Tarjeta 55)
+
+**Investment no pide el débito: lo pide el inversionista, desde el móvil,
+antes de invertir.** La app llama primero a Finance para bajar el saldo, y
+recién con el `debitId` que Finance le devuelve llama a Investment, pasándolo
+como `transactionId` — que Investment ya trata como clave de idempotencia de la
+participación. Así ningún bounded context despacha comandos del otro.
+
+```text
+POST /api/v1/accounts/{accountId}/wallets/{currency}/debits
+Idempotency-Key: <opaca, elegida por el cliente>
+X-User-Id: <inyectado por el gateway>
+
+{ "amountMinor": 500000, "reason": "INVERSION" }
+
+201 Created
+{ "debitId": "…", "walletId": "…", "accountId": "…",
+  "currency": "PEN", "amountMinor": 500000, "reason": "INVERSION" }
+```
+
+- La moneda y la cuenta van en el path, no en el body: no hay nada que pueda
+  contradecirse. `reason` es un `WalletMovementType` (`INVERSION` para la
+  app).
+- **Síncrono.** `WalletCommandServiceImpl` hace `sendAndWait`: si responde
+  `201`, el saldo ya bajó. El body se construye de los inputs del comando,
+  nunca del Read Model (la proyección corre aparte y puede ir atrás).
+- **Idempotencia**, calcada de `POST /deposits`: `Idempotency-Key`
+  obligatoria, barrera `finance_ops.wallet_debit_command_idempotencies`
+  (`UNIQUE (account_id, idempotency_key)`, `INSERT … ON CONFLICT DO NOTHING`,
+  insert primero y despacho después, `@Transactional` abarcando el
+  `sendAndWait`). Misma clave y mismo contenido → mismo `201` y el **mismo
+  `debitId`**, sin volver a debitar. Misma clave y contenido distinto →
+  `409 idempotency-key-conflict`. Un débito rechazado (saldo insuficiente)
+  revierte la reserva de la clave: el inversionista recarga y reintenta con
+  la misma.
+- **Referencia en el evento.** `DebitWalletCommand` lleva `DebitId` y
+  `WalletDebitedEvent` ganó `debitId` como último campo, **opcional**: los
+  eventos ya persistidos cargan con `null` y nada se renombró. La proyección
+  lo copia a `wallet_movements.debit_id` y `GET …/movements` lo expone como
+  `debitId` en cada movimiento de débito.
+- **Errores**, en `application/problem+json` con `code` (ver
+  `finance-contracts.md`, «Formato de errores HTTP»): `400 invalid-request` /
+  `validation-failed`, `403 forbidden`, `404 wallet-not-found` (nunca hubo
+  depósito en esa moneda: no hay nada que debitar), `409 insufficient-balance`
+  (distinguible del otro 409 por el `code`).
+
+**Las excepciones del agregado no cruzan Axon Server como tales.** El bus de
+comandos es `AxonServerCommandBus`: lo que el `@CommandHandler` lanza llega
+al `sendAndWait` como un `CommandExecutionException` genérico, sin la clase
+original. `CommandRejectionHandlerInterceptor` (lado handler) reenvuelve las
+excepciones de dominio conocidas con un `CommandRejection(code, message)`
+como `details`, que sí sobrevive el viaje; `WalletCommandServiceImpl` lo
+traduce a `CommandRejectedException` y el advice REST lo mapea por `code`.
+El agregado sigue lanzando excepciones de dominio planas; sus pruebas no
+cambian.
+
+### Quién pregunta: `X-User-Id`
+
+Desde la Tarjeta 53 el gateway valida el JWT en `/finance/api/v1/accounts/**`
+e inyecta `X-User-Id` (el `sub` del token, que es el mismo UUID que la app usa
+como `accountId`). `CallerOwnershipInterceptor` lo compara con `{accountId}`
+en **todas** las rutas `/api/v1/accounts/**` — lecturas incluidas — y responde
+`403 forbidden` si falta, no es un UUID o no coincide. Un `{accountId}` mal
+formado no lo decide el interceptor: el controller responde `400` como
+siempre.
+
+---
+
 ## Pendiente para cuando se implemente
 
-- Cómo Investment solicita un débito (comando directo, o su propio evento que
-  Finance escucha).
+- ~~Cómo Investment solicita un débito (comando directo, o su propio evento que
+  Finance escucha).~~ → **resuelto en la Tarjeta 55: ninguno de los dos.** El
+  móvil pide el débito por REST y le pasa el `debitId` a Investment.
+- Qué pasa con el dinero si el débito sale bien y la inversión falla
+  después (subasta ya llena, por ejemplo). **No hay endpoint de reverso.** Es la
+  decisión 3 de la Tarjeta 56 (móvil); acá queda anotado como hueco conocido,
+  no resuelto.

@@ -69,7 +69,8 @@ public class Wallet {
                 walletId,
                 command.amount().amountMinor(),
                 command.amount().currency().name(),
-                command.reason().name()));
+                command.reason().name(),
+                command.debitId().toString()));
     }
 
     @EventSourcingHandler
