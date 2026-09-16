@@ -11,6 +11,7 @@ import com.liquilabs.vankoo.finance.domain.exceptions.InvalidCreditAmountExcepti
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidDebitAmountException;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Money;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletId;
@@ -25,6 +26,7 @@ class WalletTest {
     private static final AccountId ACCOUNT_ID = AccountId.of("018f8f2e-0000-7000-8000-000000000001");
     private static final WalletId WALLET_ID = WalletId.derive(ACCOUNT_ID, Currency.PEN);
     private static final DepositId SOURCE_DEPOSIT_ID = new DepositId();
+    private static final DebitId DEBIT_ID = new DebitId();
 
     private FixtureConfiguration<Wallet> fixture;
 
@@ -59,14 +61,22 @@ class WalletTest {
     @Test
     void debitsAWalletWithSufficientBalance() {
         fixture.given(openedEvent(), creditedEvent(12_500L))
-                .when(new DebitWalletCommand(WALLET_ID, new Money(5_000L, Currency.PEN), WalletMovementType.INVERSION))
-                .expectEvents(new WalletDebitedEvent(WALLET_ID.toString(), 5_000L, "PEN", "INVERSION"));
+                .when(new DebitWalletCommand(WALLET_ID, DEBIT_ID, new Money(5_000L, Currency.PEN), WalletMovementType.INVERSION))
+                .expectEvents(new WalletDebitedEvent(WALLET_ID.toString(), 5_000L, "PEN", "INVERSION", DEBIT_ID.toString()));
+    }
+
+    @Test
+    void debitsCarryTheirDebitIdInTheEvent() {
+        DebitId anotherDebit = new DebitId();
+        fixture.given(openedEvent(), creditedEvent(12_500L))
+                .when(new DebitWalletCommand(WALLET_ID, anotherDebit, new Money(1L, Currency.PEN), WalletMovementType.INVERSION))
+                .expectEvents(new WalletDebitedEvent(WALLET_ID.toString(), 1L, "PEN", "INVERSION", anotherDebit.toString()));
     }
 
     @Test
     void rejectsADebitThatExceedsTheBalance() {
         fixture.given(openedEvent(), creditedEvent(5_000L))
-                .when(new DebitWalletCommand(WALLET_ID, new Money(5_001L, Currency.PEN), WalletMovementType.RETIRO))
+                .when(new DebitWalletCommand(WALLET_ID, DEBIT_ID, new Money(5_001L, Currency.PEN), WalletMovementType.RETIRO))
                 .expectException(InsufficientBalanceException.class);
     }
 
@@ -74,7 +84,7 @@ class WalletTest {
     void rejectsNonPositiveDebitAmount() {
         Money invalidAmount = new Money(0L, Currency.PEN);
         fixture.given(openedEvent(), creditedEvent(12_500L))
-                .when(new DebitWalletCommand(WALLET_ID, invalidAmount, WalletMovementType.COMISION))
+                .when(new DebitWalletCommand(WALLET_ID, DEBIT_ID, invalidAmount, WalletMovementType.COMISION))
                 .expectException(InvalidDebitAmountException.class);
     }
 

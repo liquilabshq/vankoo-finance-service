@@ -9,6 +9,7 @@ import com.liquilabs.vankoo.finance.domain.model.queries.WalletBalance;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovementPage;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.MovementDirection;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletId;
@@ -113,7 +114,7 @@ class WalletProjectionTest {
         verify(walletMovementRepository).insertIfAbsent(
                 any(), eq("evt-2"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
                 eq("PEN"), eq(12_500L), eq("RECARGA"), eq("CREDIT"),
-                eq(UUID.fromString(depositId)), eq(occurredAt));
+                eq(UUID.fromString(depositId)), isNull(), eq(occurredAt));
     }
 
     @Test
@@ -123,14 +124,31 @@ class WalletProjectionTest {
         when(walletViewRepository.findByWalletId(WalletId.of(walletId))).thenReturn(Optional.of(row));
         Instant occurredAt = Instant.now();
 
-        projection.on(new WalletDebitedEvent(walletId, 10_000L, "PEN", WalletMovementType.RETIRO.name()),
+        projection.on(new WalletDebitedEvent(walletId, 10_000L, "PEN", WalletMovementType.RETIRO.name(), null),
                 "evt-3", occurredAt);
 
         assertEquals(40_000L, row.getBalanceMinor());
         verify(walletMovementRepository).insertIfAbsent(
                 any(), eq("evt-3"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
                 eq("PEN"), eq(10_000L), eq("RETIRO"), eq("DEBIT"),
-                isNull(), eq(occurredAt));
+                isNull(), isNull(), eq(occurredAt));
+    }
+
+    @Test
+    void debitedEvent_withDebitId_projectsItOntoTheMovement() {
+        WalletViewEntity row = openedRow();
+        row.credit(50_000L, "evt-2", Instant.now());
+        when(walletViewRepository.findByWalletId(WalletId.of(walletId))).thenReturn(Optional.of(row));
+        DebitId debitId = new DebitId();
+        Instant occurredAt = Instant.now();
+
+        projection.on(new WalletDebitedEvent(walletId, 10_000L, "PEN", WalletMovementType.INVERSION.name(),
+                debitId.toString()), "evt-3", occurredAt);
+
+        verify(walletMovementRepository).insertIfAbsent(
+                any(), eq("evt-3"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
+                eq("PEN"), eq(10_000L), eq("INVERSION"), eq("DEBIT"),
+                isNull(), eq(debitId.value()), eq(occurredAt));
     }
 
     @Test
@@ -143,7 +161,7 @@ class WalletProjectionTest {
         assertEquals(0L, row.getBalanceMinor(), "a re-applied event must not mutate the row");
         verify(walletViewRepository, never()).save(any());
         verify(walletMovementRepository, never())
-                .insertIfAbsent(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any());
+                .insertIfAbsent(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any(), any());
     }
 
     @Test

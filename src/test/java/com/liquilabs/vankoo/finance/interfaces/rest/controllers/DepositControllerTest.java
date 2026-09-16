@@ -94,13 +94,15 @@ class DepositControllerTest {
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("invalid-request")));
     }
 
     @Test
     void createDeposit_unsupportedCurrency_respondsBadRequest() throws Exception {
         // UnsupportedCurrencyException does not extend IllegalArgumentException,
-        // so this exercises a distinct catch branch from the malformed-id cases.
+        // so this exercises a distinct handler in FinanceExceptionHandler from the
+        // malformed-id cases.
         String body = objectMapper.writeValueAsString(new java.util.HashMap<>() {{
             put("accountId", ACCOUNT_ID);
             put("amountMinor", 12_500L);
@@ -113,7 +115,8 @@ class DepositControllerTest {
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(body))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("invalid-request")));
 
         verify(depositCommandService, never()).handle(any());
     }
@@ -126,7 +129,8 @@ class DepositControllerTest {
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content(createDepositBody()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code", is("idempotency-key-conflict")));
     }
 
     @Test
@@ -134,7 +138,8 @@ class DepositControllerTest {
         mockMvc.perform(post("/api/v1/deposits")
                         .contentType("application/json")
                         .content(createDepositBody()))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("invalid-request")));
     }
 
     @Test
@@ -143,7 +148,30 @@ class DepositControllerTest {
                         .header("Idempotency-Key", "key-1")
                         .contentType("application/json")
                         .content("{}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                // A missing primitive amountMinor fails JSON binding, before Bean
+                // Validation ever runs — hence invalid-request, not validation-failed.
+                .andExpect(jsonPath("$.code", is("invalid-request")));
+    }
+
+    @Test
+    void createDeposit_blankFields_respondsBadRequestNamingTheField() throws Exception {
+        String body = objectMapper.writeValueAsString(new java.util.HashMap<>() {{
+            put("accountId", "");
+            put("amountMinor", 12_500L);
+            put("currency", "PEN");
+            put("provider", "STRIPE");
+        }});
+
+        mockMvc.perform(post("/api/v1/deposits")
+                        .header("Idempotency-Key", "key-1")
+                        .contentType("application/json")
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("validation-failed")))
+                .andExpect(jsonPath("$.errors[0].field", is("accountId")));
+
+        verify(depositCommandService, never()).handle(any());
     }
 
     @Test
@@ -162,13 +190,15 @@ class DepositControllerTest {
         when(depositQueryService.getDepositById(any())).thenReturn(Optional.empty());
 
         mockMvc.perform(get("/api/v1/deposits/{depositId}", new DepositId().toString()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code", is("deposit-not-found")));
     }
 
     @Test
     void getDeposit_malformedId_respondsBadRequest() throws Exception {
         mockMvc.perform(get("/api/v1/deposits/{depositId}", "not-a-uuid"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("invalid-request")));
     }
 
     @Test
@@ -177,7 +207,7 @@ class DepositControllerTest {
         when(depositQueryService.listDepositsByAccount(any()))
                 .thenReturn(new DepositSummaryPage(java.util.List.of(summary), 0, 20, 1L));
 
-        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID))
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID).header("X-User-Id", ACCOUNT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements", is(1)))
                 .andExpect(jsonPath("$.items[0].status", is("SUCCEEDED")));
@@ -185,8 +215,21 @@ class DepositControllerTest {
 
     @Test
     void listDeposits_negativePage_respondsBadRequest() throws Exception {
-        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID).param("page", "-1"))
-                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID)
+                        .header("X-User-Id", ACCOUNT_ID)
+                        .param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code", is("invalid-request")));
+    }
+
+    @Test
+    void listDeposits_callerMismatch_respondsForbidden() throws Exception {
+        mockMvc.perform(get("/api/v1/accounts/{accountId}/deposits", ACCOUNT_ID)
+                        .header("X-User-Id", UUID.randomUUID().toString()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code", is("forbidden")));
+
+        verify(depositQueryService, never()).listDepositsByAccount(any());
     }
 
     private String createDepositBody() throws Exception {

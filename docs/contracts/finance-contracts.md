@@ -1429,7 +1429,24 @@ negocio.
 - Confirmar con Anjali que Stripe puede liquidar tanto `PEN` como `USD` para la
   cuenta de Vankoo, y con qué método de pago en cada caso.
 - Definir los límites de tamaño para descripción e identificadores externos.
-- Definir el formato de errores HTTP común de Vankoo.
+- ~~Definir el formato de errores HTTP común de Vankoo.~~ → **resuelto en la
+  Tarjeta 55: Finance adopta el que ya usan el gateway e IAM**, RFC 9457
+  (`application/problem+json`) con `type = https://docs.vankoo.dev/errors/<code>`,
+  `title`, `status`, `detail`, `instance` y el miembro de extensión `code`, el
+  único sobre el que los clientes deciden. `FinanceProblem` (enum) es el
+  catálogo y `FinanceExceptionHandler` (`@RestControllerAdvice`) el único
+  lugar que traduce excepciones a HTTP; los controllers ya no mapean errores
+  inline ni responden sin body. Los status que había no cambiaron. Códigos:
+
+  | `code` | Status | Cuándo |
+  |---|---|---|
+  | `invalid-request` | 400 | id mal formado, moneda no soportada, `reason` desconocido, body que no parsea, falta `Idempotency-Key`, `page`/`size` inválidos, importe que el agregado rechaza |
+  | `validation-failed` | 400 | Bean Validation sobre el body; lleva `errors[{field, code, message}]` como IAM |
+  | `forbidden` | 403 | `X-User-Id` ausente, no UUID o distinto de `{accountId}` en `/accounts/**` |
+  | `wallet-not-found` | 404 | saldo o débito de una wallet que nunca se abrió |
+  | `deposit-not-found` | 404 | `GET /deposits/{depositId}` sin fila |
+  | `idempotency-key-conflict` | 409 | misma `Idempotency-Key` con contenido distinto |
+  | `insufficient-balance` | 409 | el débito supera el saldo (mismo status que el anterior: distinguir por `code`) |
 - Definir la política de retención y el dead-letter de Kafka. **Más urgente desde
   la Tarjeta 49:** ahora que la publicación es síncrona y todo fallo se propaga,
   un evento que el broker nunca acepte reintenta para siempre y bloquea el token

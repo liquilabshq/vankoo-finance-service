@@ -36,9 +36,9 @@ public interface WalletMovementRepository extends JpaRepository<WalletMovementEn
     @Query(nativeQuery = true, value = """
             INSERT INTO finance_read_model.wallet_movements
                 (id, event_id, wallet_id, account_id, currency, amount_minor,
-                 type, direction, source_deposit_id, occurred_at)
+                 type, direction, source_deposit_id, debit_id, occurred_at)
             VALUES (:id, :eventId, :walletId, :accountId, :currency, :amountMinor,
-                    :type, :direction, :sourceDepositId, :occurredAt)
+                    :type, :direction, :sourceDepositId, :debitId, :occurredAt)
             ON CONFLICT (event_id) DO NOTHING
             """)
     int insertIfAbsent(@Param("id") UUID id,
@@ -50,5 +50,6 @@ public interface WalletMovementRepository extends JpaRepository<WalletMovementEn
                        @Param("type") String type,
                        @Param("direction") String direction,
                        @Param("sourceDepositId") UUID sourceDepositId,
+                       @Param("debitId") UUID debitId,
                        @Param("occurredAt") Instant occurredAt);
 }

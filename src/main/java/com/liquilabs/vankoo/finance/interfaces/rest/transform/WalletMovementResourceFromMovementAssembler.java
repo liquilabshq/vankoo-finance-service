@@ -16,6 +16,7 @@ public final class WalletMovementResourceFromMovementAssembler {
                 movement.amount().amountMinor(),
                 movement.amount().currency().name(),
                 movement.sourceDepositId() == null ? null : movement.sourceDepositId().toString(),
+                movement.debitId() == null ? null : movement.debitId().toString(),
                 movement.occurredAt().toString());
     }
 }
