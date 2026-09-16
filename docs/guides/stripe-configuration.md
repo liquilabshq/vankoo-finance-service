@@ -133,14 +133,56 @@ ahí conserva el valor de `application-dev.yaml`.
 
 En IntelliJ, *Run → Edit Configurations → Environment variables*, con los nombres
 tal cual aparecen en los placeholders del YAML (`STRIPE_SECRET_KEY`, etc.). Es
-para lo que existen los `${...}`, y es el mismo mecanismo que usará el contenedor
-cuando el servicio tenga uno: el `docker-compose.yaml` se las pasará por
-`environment:`.
+para lo que existen los `${...}`, y es el mismo mecanismo que usa el contenedor
+(siguiente sección).
 
 Desde una terminal, el equivalente:
 
 ```bash
 STRIPE_SECRET_KEY=sk_test_... STRIPE_WEBHOOK_SECRET=whsec_... sh ./mvnw spring-boot:run
+```
+
+---
+
+## Cómo suministrar los valores cuando Finance corre en el compose
+
+Desde que el servicio tiene `Dockerfile` y bloque `finance-service:` en
+`vankoo-infra/docker-compose.yaml`, las cinco variables entran al contenedor por
+`environment:`, y el compose las toma del **`.env` de `vankoo-infra`** — no de
+este repositorio. `config/application-local.yaml` **no viaja a la imagen** (el
+`Dockerfile` solo copia `pom.xml` y `src`, y `.dockerignore` excluye `config/`),
+así que lo que tengas ahí no cuenta dentro de Docker.
+
+En `vankoo-infra/.env` (ignorado por git; parte de `.env.example`):
+
+```
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_SUCCESS_URL=vankoo://deposits/success
+STRIPE_CANCEL_URL=vankoo://deposits/cancel
+```
+
+`STRIPE_SUCCESS_URL` y `STRIPE_CANCEL_URL` ya traen esos defaults en el compose:
+son el esquema de la app del inversionista, y Chrome vuelve solo a la app tras el
+Checkout. Solo hay que sobreescribirlos si pruebas contra un frontend web.
+
+Con las claves vacías el contenedor arranca igual (ver «Qué exige cada
+operación»): lo que falla es crear depósitos y verificar webhooks, no el servicio.
+
+El puerto 8083 está publicado en el host, así que **`stripe listen` no cambia**:
+
+```bash
+stripe listen --forward-to localhost:8083/api/v1/payment-providers/stripe/webhooks
+```
+
+El `whsec_` que imprime va en `STRIPE_WEBHOOK_SECRET` del `.env` de infra, y para
+que el contenedor lo lea hay que recrearlo: `docker compose up -d finance-service`
+(el compose solo reinyecta `environment:` al crear el contenedor, no en caliente).
+
+Para levantar o reconstruir solo Finance:
+
+```bash
+docker compose up -d --build finance-service
 ```
 
 ---
@@ -192,7 +234,8 @@ stripe trigger checkout.session.completed
 
 ## Secretos
 
-- **Nunca** en el repositorio. `config/application-local.yaml` está en `.gitignore`.
+- **Nunca** en el repositorio. `config/application-local.yaml` está en `.gitignore`,
+  y el `.env` de `vankoo-infra` también; `.env.example` lleva las claves vacías.
 - **Y nunca dentro de `src/main/resources/`**, aunque Spring también lo leería
   desde ahí. Maven copia ese directorio a `target/classes`, así que el secreto
   acabaría **empaquetado dentro del jar** — y un jar se comparte y se despliega
@@ -212,6 +255,8 @@ stripe trigger checkout.session.completed
 
 - `src/main/resources/application.yaml` y `application-dev.yaml` — la lista
   completa de variables del servicio, con sus defaults.
+- `vankoo-infra/docker-compose.yaml` (bloque `finance-service:`) y
+  `vankoo-infra/.env.example` — cómo entran esas variables al contenedor.
 - `docs/contracts/finance-contracts.md` — el contrato del puerto `PaymentProvider`
   y la taxonomía de estados.
 - `docs/uml/finance-webhook-sequence-diagram.puml` — el flujo completo del webhook.
