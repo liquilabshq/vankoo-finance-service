@@ -1,0 +1,91 @@
+# Perfil para Azure Container Apps. Parte del mismo código que `docker`, pero sin los
+# vecinos del Compose: no hay Eureka, la base de datos es un Azure Database for
+# PostgreSQL, el broker de eventos es Azure Event Hubs (que habla el protocolo de
+# Kafka) y Axon Server corre en su propia Container App. Todo valor sensible llega
+# por variable de entorno desde los secrets de la Container App.
+server:
+  port: 8083
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${FINANCE_DB_HOST}:${FINANCE_DB_PORT:5432}/${FINANCE_DB_NAME}?sslmode=${FINANCE_DB_SSLMODE:require}
+    username: ${FINANCE_DB_USERNAME}
+    password: ${FINANCE_DB_PASSWORD}
+
+  cloud:
+    stream:
+      kafka:
+        binder:
+          # <namespace>.servicebus.windows.net:9093, desde la capa messaging de vankoo-infra.
+          brokers: ${KAFKA_BROKERS}
+          # Event Hubs no deja crear topics desde los clientes: los crea Terraform.
+          auto-create-topics: false
+          configuration:
+            security.protocol: SASL_SSL
+            sasl.mechanism: PLAIN
+            # Usuario literal $ConnectionString; contraseña, la cadena de conexión de la
+            # regla de acceso de Finance (secret kafka-connection-string).
+            sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="${KAFKA_SASL_USERNAME:$ConnectionString}" password="${KAFKA_SASL_PASSWORD}";
+            # Azure corta las conexiones inactivas a los 240 s.
+            metadata.max.age.ms: 180000
+            connections.max.idle.ms: 180000
+          producer-properties:
+            acks: all
+            enable.idempotence: true
+            # Event Hubs cierra la conexión si un envío supera 1 046 528 bytes.
+            max.request.size: 1000000
+            # Mismo razonamiento que en el perfil docker (el productor se rinde antes
+            # que el timeout de handler de Axon), con los mínimos de Event Hubs: más de
+            # 20 s por petición, y 60 s con el productor idempotente. Peor caso ~70 s
+            # (max.block.ms + delivery.timeout.ms), por debajo de los 90 s de Axon.
+            # Regla de Kafka: delivery.timeout.ms >= request.timeout.ms + linger.ms.
+            max.block.ms: 5000
+            request.timeout.ms: 60000
+            delivery.timeout.ms: 65000
+        bindings:
+          finance-out-0:
+            producer:
+              sync: true
+              configuration:
+                key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      bindings:
+        # El nombre debe coincidir con EventServiceImpl.BINDING: no hay enlace de compilacion.
+        finance-out-0:
+          destination: vankoo.finance.events.v1
+          content-type: application/json
+
+axon:
+  axonserver:
+    # Nombre de la Container App de Axon Server: el DNS interno del environment
+    # lo resuelve y su ingress TCP expone el puerto gRPC.
+    servers: ${AXON_SERVER_HOST}:${AXON_SERVER_PORT:8124}
+  timeout:
+    handler:
+      events:
+        # Por encima del peor caso del productor de Kafka (~70 s, ver arriba).
+        timeout-ms: 90000
+
+# No hay discovery server en Azure: el gateway resuelve por el DNS interno del
+# Container Apps Environment.
+eureka:
+  client:
+    enabled: false
+
+documentation:
+  local-url: https://${FINANCE_PUBLIC_HOST}
+  gateway-url: https://${FINANCE_GATEWAY_HOST}/finance
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Solo lo que necesitan las sondas de la Container App.
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    org.hibernate.SQL: error
