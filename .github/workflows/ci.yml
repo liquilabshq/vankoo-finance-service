@@ -60,11 +60,10 @@ jobs:
           echo "Axon Server did not start" && exit 1
 
       - name: Build and test
-        # TEMPORAL: se excluye VankooFinanceServiceApplicationTests (contextLoads),
-        # que ya fallaba en develop antes de este pipeline ("Connector is already
-        # shut down" al arrancar Axon tras otros contextos). Quitar la exclusión
-        # cuando se corrija la prueba.
-        run: ./mvnw -B verify -Dtest='!VankooFinanceServiceApplicationTests' -Dsurefire.failIfNoSpecifiedTests=false
+        # Sin exclusiones: el "Connector is already shut down" que obligaba a saltarse
+        # contextLoads era la pausa de contextos de Spring 7, desactivada en
+        # src/test/resources/spring.properties.
+        run: ./mvnw -B verify
           
       - name: Upload coverage report
         if: always()
