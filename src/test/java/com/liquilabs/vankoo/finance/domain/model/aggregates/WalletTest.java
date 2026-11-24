@@ -1,8 +1,10 @@
 package com.liquilabs.vankoo.finance.domain.model.aggregates;
 
 import com.liquilabs.vankoo.finance.domain.model.commands.CreditWalletCommand;
+import com.liquilabs.vankoo.finance.domain.model.commands.CreditWalletFromAuctionCommand;
 import com.liquilabs.vankoo.finance.domain.model.commands.DebitWalletCommand;
 import com.liquilabs.vankoo.finance.domain.model.commands.OpenWalletCommand;
+import com.liquilabs.vankoo.finance.domain.model.events.WalletAuctionAdvanceCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletDebitedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletOpenedEvent;
@@ -10,6 +12,7 @@ import com.liquilabs.vankoo.finance.domain.exceptions.InsufficientBalanceExcepti
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidCreditAmountException;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidDebitAmountException;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.AuctionId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
@@ -56,6 +59,31 @@ class WalletTest {
         fixture.given(openedEvent())
                 .when(new CreditWalletCommand(WALLET_ID, invalidAmount, SOURCE_DEPOSIT_ID))
                 .expectException(InvalidCreditAmountException.class);
+    }
+
+    @Test
+    void creditsTheAdvanceOfAFundedAuction() {
+        AuctionId auctionId = AuctionId.of("018f8f2e-0000-7000-8000-0000000000aa");
+        fixture.given(openedEvent())
+                .when(new CreditWalletFromAuctionCommand(WALLET_ID, new Money(980_000L, Currency.PEN), auctionId))
+                .expectEvents(new WalletAuctionAdvanceCreditedEvent(
+                        WALLET_ID.toString(), 980_000L, "PEN", auctionId.toString()));
+    }
+
+    @Test
+    void rejectsNonPositiveAuctionAdvance() {
+        fixture.given(openedEvent())
+                .when(new CreditWalletFromAuctionCommand(WALLET_ID, new Money(0L, Currency.PEN),
+                        AuctionId.of("018f8f2e-0000-7000-8000-0000000000aa")))
+                .expectException(InvalidCreditAmountException.class);
+    }
+
+    @Test
+    void anAuctionAdvanceCanBeSpentAfterwards() {
+        fixture.given(openedEvent(), new WalletAuctionAdvanceCreditedEvent(
+                        WALLET_ID.toString(), 980_000L, "PEN", "018f8f2e-0000-7000-8000-0000000000aa"))
+                .when(new DebitWalletCommand(WALLET_ID, DEBIT_ID, new Money(980_000L, Currency.PEN), WalletMovementType.RETIRO))
+                .expectEvents(new WalletDebitedEvent(WALLET_ID.toString(), 980_000L, "PEN", "RETIRO", DEBIT_ID.toString()));
     }
 
     @Test

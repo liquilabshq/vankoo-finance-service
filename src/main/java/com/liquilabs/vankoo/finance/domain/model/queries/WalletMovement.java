@@ -1,5 +1,6 @@
 package com.liquilabs.vankoo.finance.domain.model.queries;
 
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.AuctionId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.MovementDirection;
@@ -16,6 +17,9 @@ import java.time.Instant;
  * @param debitId         the {@code DebitId} the client was answered with when
  *                        it requested this debit — {@code null} for credits,
  *                        and for debits recorded before the id existed
+ * @param sourceAuctionId the auction whose funding paid this movement —
+ *                        {@code null} for every {@code type} except
+ *                        {@code ADELANTO}
  */
 public record WalletMovement(
         WalletMovementKind type,
@@ -23,5 +27,6 @@ public record WalletMovement(
         Money amount,
         DepositId sourceDepositId,
         DebitId debitId,
+        AuctionId sourceAuctionId,
         Instant occurredAt) {
 }

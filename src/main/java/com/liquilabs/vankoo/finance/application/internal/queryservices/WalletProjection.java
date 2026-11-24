@@ -1,5 +1,6 @@
 package com.liquilabs.vankoo.finance.application.internal.queryservices;
 
+import com.liquilabs.vankoo.finance.domain.model.events.WalletAuctionAdvanceCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletDebitedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletOpenedEvent;
@@ -9,6 +10,7 @@ import com.liquilabs.vankoo.finance.domain.model.queries.WalletBalance;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovement;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovementPage;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.AuctionId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
@@ -38,7 +40,7 @@ import java.util.Optional;
 /**
  * The Query Model for {@code Wallet}: projection and query handlers together,
  * same shape as {@link DepositProjection}, feeding two Read Model tables from
- * the same three events instead of one:
+ * the same wallet events instead of one:
  *
  * <ul>
  *   <li>{@code wallet_views} — the running balance, one row per wallet,
@@ -108,6 +110,33 @@ public class WalletProjection implements WalletQueryService {
                 MovementDirection.CREDIT.name(),
                 DepositId.of(event.sourceDepositId()).value(),
                 null,
+                null,
+                occurredAt);
+    }
+
+    /** Same shape as the deposit credit, labelled {@code ADELANTO} and pointing at the auction. */
+    @EventHandler
+    public void on(WalletAuctionAdvanceCreditedEvent event, @MessageIdentifier String eventId,
+                   @Timestamp Instant occurredAt) {
+        WalletViewEntity row = loadRow(event.walletId(), eventId);
+        if (row.alreadyApplied(eventId)) {
+            return;
+        }
+        row.credit(event.amountMinor(), eventId, occurredAt);
+        walletViewRepository.save(row);
+
+        walletMovementRepository.insertIfAbsent(
+                Generators.timeBasedEpochGenerator().generate(),
+                eventId,
+                row.getWalletId().value(),
+                row.getAccountId().value(),
+                row.getCurrency().name(),
+                event.amountMinor(),
+                WalletMovementKind.ADELANTO.name(),
+                MovementDirection.CREDIT.name(),
+                null,
+                null,
+                AuctionId.of(event.sourceAuctionId()).value(),
                 occurredAt);
     }
 
@@ -135,6 +164,7 @@ public class WalletProjection implements WalletQueryService {
                 MovementDirection.DEBIT.name(),
                 null,
                 event.debitId() == null ? null : DebitId.of(event.debitId()).value(),
+                null,
                 occurredAt);
     }
 
@@ -186,6 +216,7 @@ public class WalletProjection implements WalletQueryService {
                 new Money(entity.getAmountMinor(), entity.getCurrency()),
                 entity.getSourceDepositId(),
                 entity.getDebitId(),
+                entity.getSourceAuctionId(),
                 entity.getOccurredAt());
     }
 }

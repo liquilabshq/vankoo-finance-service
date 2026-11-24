@@ -11,10 +11,10 @@ import org.axonframework.modelling.command.TargetAggregateIdentifier;
  * current balance.
  *
  * <p>Dispatched by {@code WalletCommandServiceImpl} on behalf of
- * {@code POST /api/v1/accounts/{accountId}/wallets/{currency}/debits}: the
- * investor's own client asks Finance to debit before it asks Investment to
- * invest, and hands Investment the {@code debitId} as its {@code transactionId}.
- * Investment never sends this command itself (see {@code wallet-contracts.md}).
+ * {@code POST /api/v1/accounts/{accountId}/wallets/{currency}/debits}, which
+ * Investment calls when an investor buys a share, with the investment's
+ * {@code transactionId} as {@code Idempotency-Key}. Investment calls the REST
+ * endpoint; it never sends this command itself (see {@code wallet-contracts.md}).
  *
  * <p>{@code debitId} is minted by the caller, not here, so that an idempotent
  * replay of the same request can answer with the id it produced the first

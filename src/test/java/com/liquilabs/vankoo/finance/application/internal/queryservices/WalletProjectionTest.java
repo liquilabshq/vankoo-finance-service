@@ -1,5 +1,6 @@
 package com.liquilabs.vankoo.finance.application.internal.queryservices;
 
+import com.liquilabs.vankoo.finance.domain.model.events.WalletAuctionAdvanceCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletDebitedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletOpenedEvent;
@@ -114,7 +115,37 @@ class WalletProjectionTest {
         verify(walletMovementRepository).insertIfAbsent(
                 any(), eq("evt-2"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
                 eq("PEN"), eq(12_500L), eq("RECARGA"), eq("CREDIT"),
-                eq(UUID.fromString(depositId)), isNull(), eq(occurredAt));
+                eq(UUID.fromString(depositId)), isNull(), isNull(), eq(occurredAt));
+    }
+
+    @Test
+    void auctionAdvanceCreditedEvent_updatesBalanceAndInsertsAdelantoMovement() {
+        WalletViewEntity row = openedRow();
+        when(walletViewRepository.findByWalletId(WalletId.of(walletId))).thenReturn(Optional.of(row));
+        String auctionId = UUID.randomUUID().toString();
+        Instant occurredAt = Instant.now();
+
+        projection.on(new WalletAuctionAdvanceCreditedEvent(walletId, 980_000L, "PEN", auctionId), "evt-2", occurredAt);
+
+        assertEquals(980_000L, row.getBalanceMinor());
+        verify(walletViewRepository).save(row);
+        verify(walletMovementRepository).insertIfAbsent(
+                any(), eq("evt-2"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
+                eq("PEN"), eq(980_000L), eq("ADELANTO"), eq("CREDIT"),
+                isNull(), isNull(), eq(UUID.fromString(auctionId)), eq(occurredAt));
+    }
+
+    @Test
+    void auctionAdvanceCreditedEvent_replayed_doesNotDoubleApply() {
+        WalletViewEntity row = openedRow(); // lastEventId = "evt-1"
+        when(walletViewRepository.findByWalletId(WalletId.of(walletId))).thenReturn(Optional.of(row));
+
+        projection.on(new WalletAuctionAdvanceCreditedEvent(walletId, 980_000L, "PEN", UUID.randomUUID().toString()),
+                "evt-1", Instant.now());
+
+        assertEquals(0L, row.getBalanceMinor());
+        verify(walletMovementRepository, never())
+                .insertIfAbsent(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -131,7 +162,7 @@ class WalletProjectionTest {
         verify(walletMovementRepository).insertIfAbsent(
                 any(), eq("evt-3"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
                 eq("PEN"), eq(10_000L), eq("RETIRO"), eq("DEBIT"),
-                isNull(), isNull(), eq(occurredAt));
+                isNull(), isNull(), isNull(), eq(occurredAt));
     }
 
     @Test
@@ -148,7 +179,7 @@ class WalletProjectionTest {
         verify(walletMovementRepository).insertIfAbsent(
                 any(), eq("evt-3"), eq(UUID.fromString(walletId)), eq(UUID.fromString(accountId)),
                 eq("PEN"), eq(10_000L), eq("INVERSION"), eq("DEBIT"),
-                isNull(), eq(debitId.value()), eq(occurredAt));
+                isNull(), eq(debitId.value()), isNull(), eq(occurredAt));
     }
 
     @Test
@@ -161,7 +192,7 @@ class WalletProjectionTest {
         assertEquals(0L, row.getBalanceMinor(), "a re-applied event must not mutate the row");
         verify(walletViewRepository, never()).save(any());
         verify(walletMovementRepository, never())
-                .insertIfAbsent(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any(), any());
+                .insertIfAbsent(any(), any(), any(), any(), any(), anyLong(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
