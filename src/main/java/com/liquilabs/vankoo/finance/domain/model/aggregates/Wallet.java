@@ -4,8 +4,10 @@ import com.liquilabs.vankoo.finance.domain.exceptions.InsufficientBalanceExcepti
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidCreditAmountException;
 import com.liquilabs.vankoo.finance.domain.exceptions.InvalidDebitAmountException;
 import com.liquilabs.vankoo.finance.domain.model.commands.CreditWalletCommand;
+import com.liquilabs.vankoo.finance.domain.model.commands.CreditWalletFromAuctionCommand;
 import com.liquilabs.vankoo.finance.domain.model.commands.DebitWalletCommand;
 import com.liquilabs.vankoo.finance.domain.model.commands.OpenWalletCommand;
+import com.liquilabs.vankoo.finance.domain.model.events.WalletAuctionAdvanceCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletCreditedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletDebitedEvent;
 import com.liquilabs.vankoo.finance.domain.model.events.WalletOpenedEvent;
@@ -18,8 +20,10 @@ import org.axonframework.spring.stereotype.Aggregate;
 import static org.axonframework.modelling.command.AggregateLifecycle.apply;
 
 /**
- * Holds an investor's balance in one currency. One {@code Wallet} exists per
- * {@code (accountId, currency)} — see {@code wallet-contracts.md}.
+ * Holds an account's balance in one currency. One {@code Wallet} exists per
+ * {@code (accountId, currency)} — see {@code wallet-contracts.md}. The account
+ * is an investor's (credited by deposits, debited by investments) or a MYPE's
+ * (credited by the advance of its funded auctions).
  *
  * <p>Follows {@code Deposit}'s exact idiom: invariants are checked in the
  * {@code @CommandHandler}s, before {@code apply(...)}; {@code @EventSourcingHandler}s
@@ -58,6 +62,18 @@ public class Wallet {
     }
 
     @CommandHandler
+    public void handle(CreditWalletFromAuctionCommand command) {
+        if (command.amount().amountMinor() <= 0) {
+            throw new InvalidCreditAmountException(command.amount().amountMinor());
+        }
+        apply(new WalletAuctionAdvanceCreditedEvent(
+                walletId,
+                command.amount().amountMinor(),
+                command.amount().currency().name(),
+                command.sourceAuctionId().toString()));
+    }
+
+    @CommandHandler
     public void handle(DebitWalletCommand command) {
         if (command.amount().amountMinor() <= 0) {
             throw new InvalidDebitAmountException(command.amount().amountMinor());
@@ -83,6 +99,11 @@ public class Wallet {
 
     @EventSourcingHandler
     public void on(WalletCreditedEvent event) {
+        this.balanceMinor += event.amountMinor();
+    }
+
+    @EventSourcingHandler
+    public void on(WalletAuctionAdvanceCreditedEvent event) {
         this.balanceMinor += event.amountMinor();
     }
 

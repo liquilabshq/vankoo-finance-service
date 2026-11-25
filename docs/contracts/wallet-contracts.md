@@ -138,7 +138,8 @@ Además de la recarga (crédito, ya cubierto arriba), `Wallet` reconoce:
 | Movimiento | Efecto | Origen |
 |---|---|---|
 | Recarga (`Deposit` exitoso) | Crédito | `DepositSucceededEvent` (interno) |
-| Inversión | Débito | `DebitWalletCommand`, despachado por `POST /api/v1/accounts/{accountId}/wallets/{currency}/debits` a pedido del propio inversionista (ver «Débito por REST» abajo) |
+| Adelanto (subasta fondeada) | Crédito, a la MYPE | `AuctionFullyFunded` de Investment por Kafka (ver «Abono a la MYPE» abajo) |
+| Inversión | Débito | `DebitWalletCommand`, despachado por `POST /api/v1/accounts/{accountId}/wallets/{currency}/debits`, que desde noviembre de 2026 llama Investment al comprar la participación (ver «Débito por REST» abajo) |
 | Retiro | Débito | comando propio de `Wallet` |
 | Comisión | Débito | comando propio de `Wallet` |
 | Reverso | Crédito o débito compensatorio | corrige un movimiento previo ya aplicado (ej. chargeback de Stripe sobre una recarga ya acreditada) |
@@ -201,11 +202,15 @@ primero solo repite lógica sin necesidad. `WalletProjection` deriva el
 
 ## Débito por REST (Tarjeta 55)
 
-**Investment no pide el débito: lo pide el inversionista, desde el móvil,
-antes de invertir.** La app llama primero a Finance para bajar el saldo, y
-recién con el `debitId` que Finance le devuelve llama a Investment, pasándolo
-como `transactionId` — que Investment ya trata como clave de idempotencia de la
-participación. Así ningún bounded context despacha comandos del otro.
+**Desde noviembre de 2026 el débito lo pide Investment, al comprar la
+participación.** Antes lo pedía la app y luego compraba, y eso permitía saltarse
+el pago o comprar con el id de otro. Ahora `POST /auctions/{id}/investments`
+de Investment comprueba que `X-User-Id` sea el inversionista, valida que la
+subasta acepte el monto (bajo el bloqueo de su fila), llama a este endpoint con
+`accountId` = `X-User-Id` = el inversionista e `Idempotency-Key` = el
+`transactionId` de la inversión, y solo si responde `201` concede la
+participación. Finance no sabe de subastas: para él es un débito más con
+motivo `INVERSION`. Ningún bounded context despacha comandos del otro.
 
 ```text
 POST /api/v1/accounts/{accountId}/wallets/{currency}/debits
@@ -255,6 +260,36 @@ traduce a `CommandRejectedException` y el advice REST lo mapea por `code`.
 El agregado sigue lanzando excepciones de dominio planas; sus pruebas no
 cambian.
 
+### Abono a la MYPE (noviembre de 2026)
+
+Finance consume `investment.auction-lifecycle.v1` (grupo `finance-service`,
+`AuctionLifecycleEventHandler` en `interfaces/messaging/eventhandlers`). Solo
+le importa `AuctionFullyFunded`, que ahora trae `mypeId`, `currency`,
+`fundedAmount` y `mypeAdvance` (campos opcionales del contrato v1). Se abona
+**`mypeAdvance`**, lo que recibe la MYPE según la cotización aceptada (el
+objetivo menos la comisión y su IGV), no lo que pusieron los inversionistas.
+
+- **Cuenta de la MYPE.** `mypeId` es el id de usuario de IAM de la MYPE (el
+  `sub` de su JWT), el mismo que Invoicing pone en la factura e Investment en
+  la subasta. Es también lo que Finance ya usa como `accountId` del
+  inversionista, así que la billetera es `WalletId.derive(mypeId, currency)` y
+  la web la lee con su propio `sub`. No hace falta tabla de traducción.
+- **Creación.** La MYPE nunca recarga, así que su primera subasta fondeada
+  abre la billetera, comprobando el event store (nunca una proyección).
+- **Idempotencia por subasta**, no por `eventId`:
+  `finance_ops.wallet_credited_auctions` con `UNIQUE (auction_id)` e
+  `INSERT … ON CONFLICT DO NOTHING` antes del comando, en la misma transacción.
+  El mismo hecho reentregado, o republicado con otro `eventId`, abona una vez.
+- **Evento propio**: `CreditWalletFromAuctionCommand` →
+  `WalletAuctionAdvanceCreditedEvent`, proyectado como movimiento `ADELANTO`
+  (crédito) con `sourceAuctionId`.
+- **Fallos.** Un mensaje que nunca servirá (no es JSON, `mypeId` que no es
+  UUID, más de dos decimales) se registra y se confirma. Un fallo de BD o de
+  Axon Server se relanza: el binder reintenta 3 veces y luego lo aparca en
+  `investment.auction-lifecycle.v1.finance.dlq`.
+- **Eventos viejos.** Un `AuctionFullyFunded` publicado antes del cambio trae
+  `data` vacío: se registra un aviso y se salta, nunca se adivina el monto.
+
 ### Quién pregunta: `X-User-Id`
 
 Desde la Tarjeta 53 el gateway valida el JWT en `/finance/api/v1/accounts/**`
@@ -270,9 +305,12 @@ siempre.
 ## Pendiente para cuando se implemente
 
 - ~~Cómo Investment solicita un débito (comando directo, o su propio evento que
-  Finance escucha).~~ → **resuelto en la Tarjeta 55: ninguno de los dos.** El
-  móvil pide el débito por REST y le pasa el `debitId` a Investment.
+  Finance escucha).~~ → **resuelto en noviembre de 2026: por REST, desde
+  Investment** (antes lo pedía el móvil, Tarjeta 55).
 - Qué pasa con el dinero si el débito sale bien y la inversión falla
-  después (subasta ya llena, por ejemplo). **No hay endpoint de reverso.** Es la
-  decisión 3 de la Tarjeta 56 (móvil); acá queda anotado como hueco conocido,
-  no resuelto.
+  después. Investment valida la subasta bajo bloqueo **antes** de debitar, así
+  que «la subasta ya estaba llena» no puede pasar. Queda la ventana de que la
+  transacción de Investment falle tras el `201`: el cliente reintenta con el
+  mismo `transactionId`, Finance repite el débito sin cobrar otra vez y la
+  participación se concede. **Sigue sin haber endpoint de reverso** para un
+  cliente que no reintenta.

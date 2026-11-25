@@ -1,6 +1,7 @@
 package com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.entities;
 
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.AuctionId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
@@ -8,6 +9,7 @@ import com.liquilabs.vankoo.finance.domain.model.valueobjects.MovementDirection;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.WalletMovementKind;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.AccountIdConverter;
+import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.AuctionIdConverter;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.DebitIdConverter;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.DepositIdConverter;
 import com.liquilabs.vankoo.finance.infrastructure.persistence.jpa.converters.WalletIdConverter;
@@ -90,6 +92,10 @@ public class WalletMovementEntity {
      */
     @Convert(converter = DebitIdConverter.class)
     private DebitId debitId;
+
+    /** Set only when {@link #type} is {@code ADELANTO}: the auction whose funding paid it. */
+    @Convert(converter = AuctionIdConverter.class)
+    private AuctionId sourceAuctionId;
 
     @Column(nullable = false)
     private Instant occurredAt;

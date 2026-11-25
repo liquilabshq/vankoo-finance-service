@@ -8,12 +8,17 @@ package com.liquilabs.vankoo.finance.domain.model.valueobjects;
  * enum adds {@code RECARGA} as the label a credit is given when projected
  * into wallet history.
  *
+ * <p>{@code ADELANTO} is the other credit label: the advance a MYPE receives
+ * when its invoice's auction is fully funded
+ * ({@code WalletAuctionAdvanceCreditedEvent}).
+ *
  * <p>The three debit names match {@link WalletMovementType}'s literally, so
  * {@code WalletMovementKind.valueOf(event.reason())} works directly with no
  * translation table.
  */
 public enum WalletMovementKind {
     RECARGA,
+    ADELANTO,
     INVERSION,
     RETIRO,
     COMISION

@@ -5,6 +5,29 @@ spring:
     active: ${SPRING_PROFILES_ACTIVE:dev}
   datasource:
     driver-class-name: org.postgresql.Driver
+  cloud:
+    function:
+      # Consumidores funcionales. El productor (finance-out-0) va por StreamBridge
+      # y no necesita estar aqui. El nombre es el del bean AuctionLifecycleEventHandler.
+      definition: auctionLifecycle
+    stream:
+      bindings:
+        auctionLifecycle-in-0:
+          # Contrato de Investment: docs/contracts/auction-lifecycle/v1 en su repo.
+          destination: investment.auction-lifecycle.v1
+          # Grupo propio: Finance lee el topic entero sin quitarle mensajes a nadie,
+          # y al ser un grupo con nombre empieza desde el principio la primera vez.
+          group: finance-service
+          consumer:
+            max-attempts: 3
+      kafka:
+        bindings:
+          auctionLifecycle-in-0:
+            consumer:
+              # Lo que siga fallando tras los reintentos (BD o Axon Server caidos)
+              # se aparca aqui en vez de bloquear la particion.
+              enable-dlq: true
+              dlq-name: investment.auction-lifecycle.v1.finance.dlq
   flyway:
     enabled: true
     locations: classpath:db/migration

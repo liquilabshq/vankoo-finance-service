@@ -7,6 +7,7 @@ import com.liquilabs.vankoo.finance.domain.model.queries.WalletBalance;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovement;
 import com.liquilabs.vankoo.finance.domain.model.queries.WalletMovementPage;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.AccountId;
+import com.liquilabs.vankoo.finance.domain.model.valueobjects.AuctionId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.Currency;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DebitId;
 import com.liquilabs.vankoo.finance.domain.model.valueobjects.DepositId;
@@ -265,22 +266,30 @@ class WalletControllerTest {
         DebitId debitId = new DebitId();
         WalletMovement credit = new WalletMovement(
                 WalletMovementKind.RECARGA, MovementDirection.CREDIT,
-                new Money(12_500L, Currency.PEN), DepositId.of(UUID.randomUUID().toString()), null, Instant.now());
+                new Money(12_500L, Currency.PEN), DepositId.of(UUID.randomUUID().toString()), null, null, Instant.now());
         WalletMovement debit = new WalletMovement(
                 WalletMovementKind.INVERSION, MovementDirection.DEBIT,
-                new Money(5_000L, Currency.PEN), null, debitId, Instant.now());
+                new Money(5_000L, Currency.PEN), null, debitId, null, Instant.now());
+        AuctionId auctionId = AuctionId.of(UUID.randomUUID().toString());
+        WalletMovement advance = new WalletMovement(
+                WalletMovementKind.ADELANTO, MovementDirection.CREDIT,
+                new Money(980_000L, Currency.PEN), null, null, auctionId, Instant.now());
         when(walletQueryService.listWalletMovements(any()))
-                .thenReturn(new WalletMovementPage(List.of(debit, credit), 0, 20, 2L));
+                .thenReturn(new WalletMovementPage(List.of(debit, credit, advance), 0, 20, 3L));
 
         mockMvc.perform(get("/api/v1/accounts/{accountId}/wallets/{currency}/movements", ACCOUNT_ID, "PEN")
                         .header(CALLER_HEADER, ACCOUNT_ID))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.totalElements", is(2)))
+                .andExpect(jsonPath("$.totalElements", is(3)))
                 .andExpect(jsonPath("$.items[0].type", is("INVERSION")))
                 .andExpect(jsonPath("$.items[0].debitId", is(debitId.toString())))
                 .andExpect(jsonPath("$.items[0].sourceDepositId", nullValue()))
                 .andExpect(jsonPath("$.items[1].type", is("RECARGA")))
-                .andExpect(jsonPath("$.items[1].debitId", nullValue()));
+                .andExpect(jsonPath("$.items[1].debitId", nullValue()))
+                .andExpect(jsonPath("$.items[1].sourceAuctionId", nullValue()))
+                .andExpect(jsonPath("$.items[2].type", is("ADELANTO")))
+                .andExpect(jsonPath("$.items[2].direction", is("CREDIT")))
+                .andExpect(jsonPath("$.items[2].sourceAuctionId", is(auctionId.toString())));
     }
 
     @Test

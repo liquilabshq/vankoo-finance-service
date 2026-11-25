@@ -7,6 +7,8 @@ package com.liquilabs.vankoo.finance.interfaces.rest.resources;
  * @param debitId         set only for debits requested through
  *                        {@code POST .../debits} — the same value that
  *                        request was answered with
+ * @param sourceAuctionId set only for {@code ADELANTO}: the auction whose
+ *                        funding paid the MYPE
  */
 public record WalletMovementResource(
         String type,
@@ -15,5 +17,6 @@ public record WalletMovementResource(
         String currency,
         String sourceDepositId,
         String debitId,
+        String sourceAuctionId,
         String occurredAt) {
 }
